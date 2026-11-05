@@ -1,0 +1,39 @@
+<view class="wrap">
+  <block wx:if="{{track}}">
+    <image class="artwork {{isPlaying ? 'spin' : ''}}" src="{{track.cover}}" mode="aspectFill" />
+
+    <view class="meta">
+      <text class="name">{{track.name}}</text>
+      <text class="artist">{{track.artist}}</text>
+    </view>
+
+    <slider
+      class="progress"
+      min="0"
+      max="{{duration || 1}}"
+      value="{{current}}"
+      activeColor="#007aff"
+      backgroundColor="rgba(0,0,0,0.08)"
+      block-size="18"
+      bindchange="onSeek"
+    />
+    <view class="times"><text>{{currText}}</text><text>{{durText}}</text></view>
+
+    <view class="controls">
+      <button class="ctl-btn" bindtap="onPrev" plain>⏮</button>
+      <button class="ctl-btn main" bindtap="onToggle" plain>{{isPlaying ? '⏸' : '▶'}}</button>
+      <button class="ctl-btn" bindtap="onNext" plain>⏭</button>
+    </view>
+
+    <scroll-view class="lyrics" scroll-y>
+      <view wx:if="{{lyricError}}" class="empty">{{lyricError}}</view>
+      <view
+        wx:for="{{lyricLines}}"
+        wx:key="index"
+        class="lyric {{index === lyricActive ? 'lyric-active' : ''}}"
+      >{{item.text}}</view>
+    </scroll-view>
+  </block>
+
+  <view wx:else class="empty">从首页选一首歌开始播放</view>
+</view>

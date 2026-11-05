@@ -1,0 +1,15 @@
+{
+  "pages": [
+    "pages/index/index",
+    "pages/player/player"
+  ],
+  "window": {
+    "navigationBarBackgroundColor": "#f7f7f9",
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "PureTone",
+    "backgroundColor": "#f7f7f9",
+    "backgroundTextStyle": "dark"
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}

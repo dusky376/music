@@ -1,0 +1,15 @@
+{
+  "desc": "PureTone 小程序客户端（复用本地后端 /api/*）",
+  "appid": "touristappid",
+  "compileType": "miniprogram",
+  "projectname": "puretone-miniprogram",
+  "setting": {
+    "urlCheck": false,
+    "es6": true,
+    "enhance": true,
+    "postcss": true,
+    "minified": true,
+    "ignoreDevUnusedFiles": false
+  },
+  "libVersion": "latest"
+}

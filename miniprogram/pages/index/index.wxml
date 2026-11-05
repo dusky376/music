@@ -1,0 +1,37 @@
+<view class="wrap">
+  <scroll-view class="chips" scroll-x enable-flex>
+    <view
+      wx:for="{{sections}}"
+      wx:key="key"
+      class="chip {{item.key === activeKey ? 'chip-active' : ''}}"
+      data-key="{{item.key}}"
+      bindtap="switchSection"
+    >{{item.title}}</view>
+  </scroll-view>
+
+  <view class="hero">
+    <text class="hero-title">{{title}}</text>
+    <button class="btn-pill" size="mini" bindtap="onPlayAll" disabled="{{!tracks.length}}">播放全部</button>
+  </view>
+
+  <view wx:if="{{loading}}" class="empty">正在加载…</view>
+  <view wx:elif="{{error}}" class="empty">{{error}}</view>
+  <view wx:elif="{{!tracks.length}}" class="empty">这里暂时没有歌曲</view>
+
+  <view wx:else class="card list">
+    <view
+      wx:for="{{tracks}}"
+      wx:key="id"
+      class="row"
+      data-index="{{index}}"
+      bindtap="onPlayRow"
+    >
+      <image class="cover" src="{{item.cover}}" mode="aspectFill" lazy-load />
+      <view class="meta">
+        <view class="name">{{item.name}}<text wx:if="{{item.vip}}" class="badge">VIP</text></view>
+        <view class="artist">{{item.artist}} · {{item.album}}</view>
+      </view>
+      <view class="dur">{{item.durText}}</view>
+    </view>
+  </view>
+</view>

@@ -1,0 +1,41 @@
+page {
+  background: #f7f7f9;
+  color: #1d1d1f;
+  font-size: 28rpx;
+}
+
+.card {
+  background: #ffffff;
+  border-radius: 20rpx;
+  box-shadow: 0 6rpx 24rpx rgba(0, 0, 0, 0.06);
+}
+
+.btn-pill {
+  background: #007aff;
+  color: #fff;
+  border-radius: 40rpx;
+  font-size: 26rpx;
+  padding: 12rpx 34rpx;
+  line-height: 1.4;
+}
+
+.btn-pill[disabled],
+.btn-pill.minor {
+  background: rgba(0, 0, 0, 0.05);
+  color: #5f5f66;
+}
+
+.badge {
+  font-size: 18rpx;
+  color: #b45309;
+  border: 2rpx solid rgba(180, 83, 9, 0.4);
+  border-radius: 6rpx;
+  padding: 0 6rpx;
+  margin-left: 10rpx;
+}
+
+.empty {
+  text-align: center;
+  color: #75757c;
+  padding: 120rpx 0;
+}
