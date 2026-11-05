@@ -1,0 +1,15 @@
+{
+  "name": "puretone",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "PureTone — 原生 ES Modules 前端 + Node 本地代理的极简音乐播放器",
+  "scripts": {
+    "dev": "node --watch server/index.js",
+    "start": "node server/index.js",
+    "check": "node --check server/index.js && node --check server/netease.js && node --check server/cache.js && node --check src/main.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

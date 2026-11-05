@@ -1,0 +1,253 @@
+.track-item {
+  position: relative;
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: 44px 46px minmax(0, 2.15fr) minmax(0, 1.15fr) minmax(0, 1.35fr) 56px;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 12px;
+  color: var(--text-main);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 140ms ease, opacity 140ms ease;
+}
+
+.track-item::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 0;
+  height: 1px;
+  background: var(--divider);
+  pointer-events: none;
+}
+
+.track-item:last-child::after {
+  display: none;
+}
+
+.track-item:hover {
+  background: var(--bg-soft);
+}
+
+.track-item.active {
+  background: var(--accent-soft);
+}
+
+.track-item.active::after {
+  opacity: 0;
+}
+
+.track-item.unavailable {
+  opacity: 0.42;
+}
+
+.track-item.unavailable.active {
+  opacity: 0.72;
+}
+
+.col-index {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.idx-text {
+  transition: opacity 120ms ease;
+}
+
+.hover-play-icon {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-main);
+}
+
+.hover-play-icon .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.track-item:hover .idx-text {
+  opacity: 0;
+}
+
+.track-item:hover .hover-play-icon {
+  display: flex;
+}
+
+.track-item.active .idx-text,
+.track-item.active .hover-play-icon {
+  display: none;
+}
+
+.sound-bars {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 2px;
+  height: 16px;
+  margin: auto;
+}
+
+.track-item.active .sound-bars {
+  display: flex;
+}
+
+.sound-bars span {
+  width: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  animation: sound-motion 720ms infinite alternate ease-in-out;
+}
+
+.sound-bars span:nth-child(1) {
+  height: 6px;
+  animation-delay: 80ms;
+}
+
+.sound-bars span:nth-child(2) {
+  height: 14px;
+  animation-delay: 260ms;
+}
+
+.sound-bars span:nth-child(3) {
+  height: 9px;
+}
+
+.sound-bars.paused span {
+  animation-play-state: paused;
+}
+
+@keyframes sound-motion {
+  from {
+    height: 4px;
+  }
+  to {
+    height: 15px;
+  }
+}
+
+.col-art {
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--bg-soft);
+  box-shadow: 0 2px 8px rgba(20, 20, 24, 0.08);
+}
+
+.col-name,
+.col-artist,
+.col-album {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.col-name {
+  padding-right: 16px;
+  font-weight: 620;
+  letter-spacing: -0.008em;
+}
+
+.track-item.active .col-name {
+  color: var(--accent-deep);
+}
+
+.track-name-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.col-artist,
+.col-album {
+  padding-right: 16px;
+  color: var(--text-sub);
+  font-size: 12.5px;
+}
+
+.col-album {
+  color: var(--text-muted);
+}
+
+.col-duration {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.track-fav-btn {
+  position: absolute;
+  right: 72px;
+  top: 50%;
+  width: 30px;
+  height: 30px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-50%);
+  transition: color 160ms ease, transform 160ms ease;
+}
+
+.track-fav-btn .icon {
+  width: 15px;
+  height: 15px;
+}
+
+.track-item:hover .track-fav-btn,
+.track-fav-btn.favorited {
+  display: inline-flex;
+}
+
+.track-fav-btn:hover {
+  color: var(--accent);
+  transform: translateY(-50%) scale(1.08);
+}
+
+.track-fav-btn.favorited {
+  color: var(--accent);
+}
+
+.track-item:focus-visible {
+  outline-offset: -2px;
+}
+
+/* Empty, error and loading states live inside the list area. */
+.track-grid-body[aria-busy="true"] {
+  cursor: progress;
+}
+
+@media (hover: none) {
+  .track-item:hover .idx-text {
+    opacity: 1;
+  }
+
+  .track-item:hover .hover-play-icon {
+    display: none;
+  }
+
+  .track-item:hover .track-fav-btn {
+    display: none;
+  }
+
+  .track-fav-btn.favorited {
+    display: inline-flex;
+  }
+}

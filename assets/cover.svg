@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600" role="img" aria-label="PureTone">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff6a7f"/>
+      <stop offset="0.52" stop-color="#f3253f"/>
+      <stop offset="1" stop-color="#a80d24"/>
+    </linearGradient>
+    <radialGradient id="h" cx="0.3" cy="0.2" r="0.8">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.38"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="600" height="600" rx="72" fill="url(#g)"/>
+  <rect width="600" height="600" rx="72" fill="url(#h)"/>
+  <g fill="none" stroke="#ffffff" stroke-width="24" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M238 392V208l184-34v184"/>
+    <circle cx="196" cy="398" r="44" fill="#ffffff" stroke="none"/>
+    <circle cx="380" cy="364" r="44" fill="#ffffff" stroke="none"/>
+  </g>
+  <text x="60" y="510" fill="#ffffff" font-family="Arial, sans-serif" font-size="34" font-weight="700" letter-spacing="7" opacity="0.82">PURETONE</text>
+</svg>
