@@ -77,6 +77,17 @@ export function normalizeTrack(song) {
 }
 
 export async function upstream(path, params = {}, options = {}) {
+  // 高峰期上游偶发超时：超时类错误自动重试一次（1s 退避），其余错误不重试。
+  try {
+    return await upstreamOnce(path, params, options);
+  } catch (error) {
+    if (error?.code !== 'UPSTREAM_TIMEOUT' || options.noRetry) throw error;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    return upstreamOnce(path, params, { ...options, noRetry: true });
+  }
+}
+
+async function upstreamOnce(path, params, options) {
   const url = new URL(UPSTREAM + (path.startsWith('/') ? path : '/' + path));
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined && value !== null) url.searchParams.set(key, String(value));
