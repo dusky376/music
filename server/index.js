@@ -11,6 +11,10 @@ import {
   getSection,
   getSimilar,
   getTrackUrl,
+  loginQrCheck,
+  loginQrCreate,
+  loginState,
+  logout,
   proxyAudio,
   search,
   sectionsMeta,
@@ -24,6 +28,7 @@ const MIME = {
   '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
@@ -66,6 +71,7 @@ function sendError(res, error) {
 function isAllowedStatic(pathname) {
   return (
     pathname === '/index.html' ||
+    pathname === '/manifest.webmanifest' ||
     pathname.startsWith('/src/') ||
     pathname.startsWith('/assets/')
   );
@@ -124,6 +130,7 @@ async function handleApi(req, res, url) {
         ok: true,
         upstream: 'https://apis.netstart.cn/music',
         cookie: Boolean(COOKIE),
+        login: loginState(),
         cache: stats(),
         uptime: Math.round(process.uptime()),
       });
@@ -179,6 +186,25 @@ async function handleApi(req, res, url) {
     match = pathname.match(/^\/api\/audio\/(\d+)$/);
     if (match && (req.method === 'GET' || req.method === 'HEAD')) {
       await proxyAudio(match[1], req, res);
+      return;
+    }
+
+    // —— 扫码登录（仅本机使用，cookie 只存内存 + 本地文件）——
+    if (pathname === '/api/login/status' && req.method === 'GET') {
+      sendJSON(res, 200, loginState());
+      return;
+    }
+    if (pathname === '/api/login/qr' && req.method === 'GET') {
+      sendJSON(res, 200, await loginQrCreate());
+      return;
+    }
+    if (pathname === '/api/login/qr/check' && req.method === 'GET') {
+      const key = url.searchParams.get('key') || '';
+      sendJSON(res, 200, await loginQrCheck(key));
+      return;
+    }
+    if (pathname === '/api/logout' && req.method === 'POST') {
+      sendJSON(res, 200, logout());
       return;
     }
 

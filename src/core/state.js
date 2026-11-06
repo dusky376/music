@@ -16,6 +16,7 @@ export const store = {
   muted: false,
   shuffle: false,
   quality: 'standard',
+  filterPlayable: false,
   favorites: Array.isArray(storedFavorites) ? storedFavorites.map(cleanTrack).filter(Boolean) : [],
   history: Array.isArray(storedHistory) ? storedHistory.map(cleanTrack).filter(Boolean).slice(0, 50) : [],
   lyrics: [],
@@ -68,6 +69,7 @@ export function saveSettings() {
     muted: store.muted,
     shuffle: store.shuffle,
     quality: store.quality,
+    filterPlayable: store.filterPlayable,
   });
 }
 
@@ -77,4 +79,5 @@ export function loadSettings() {
   store.muted = Boolean(settings.muted);
   store.shuffle = Boolean(settings.shuffle);
   if (typeof settings.quality === 'string') store.quality = settings.quality;
+  if (typeof settings.filterPlayable === 'boolean') store.filterPlayable = settings.filterPlayable;
 }

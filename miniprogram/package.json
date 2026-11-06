@@ -1,0 +1,9 @@
+{
+  "name": "puretone-miniprogram",
+  "private": true,
+  "type": "commonjs",
+  "description": "微信小程序端：原生 WXML/WXSS/JS，无构建步骤。type=commonjs 防止外层 package.json 的 type=module 让本地 node 校验把小程序文件当 ESM。",
+  "scripts": {
+    "devtools": "微信开发者工具导入本目录运行"
+  }
+}

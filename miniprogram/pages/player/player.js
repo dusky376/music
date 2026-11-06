@@ -23,6 +23,16 @@ Page({
 
   onLoad() {
     const app = getApp();
+    // 订阅制：页面常驻 app 事件总线，onUnload 统一退订。
+    // 事件名登记进 _subscribed 后，app._emit 的旧当前页兜底推送会对本页关闭，避免重复。
+    this._subscribed = new Set(['time', 'status', 'track', 'error']);
+    this._subs = [
+      app.subscribe('time', (d) => this.handleAudioTime(d)),
+      app.subscribe('status', (d) => this.handleAudioStatus(d)),
+      app.subscribe('track', (d) => this.handleAudioTrack(d)),
+      app.subscribe('error', (d) => this.handleAudioError(d)),
+    ];
+
     const track = app.current();
     if (!track) {
       const { queue } = app.globalData;
@@ -43,22 +53,29 @@ Page({
       this.setData({ track });
     }
     if (track) this.setData({ isPlaying: app.isPlaying() });
+    // 已知坑修复：从其它页面回来时，可能残留"拖动中"状态导致进度冻结不刷新。
+    this.scrubbing = false;
   },
 
   onUnload() {
-    // 音频实例常驻 app，离开页面只解绑回调引用，不销毁。
+    // 音频实例常驻 app；页面只解绑自己的订阅，防泄漏。
+    (this._subs || []).forEach((dispose) => dispose());
+    this._subs = [];
   },
 
-  onAudioTrack({ track }) {
+  handleAudioTrack({ track }) {
+    this.scrubbing = false;
     this.setData({ track, lyricLines: [], lyricActive: -1, lyricError: '' });
     this.loadLyric(track);
   },
 
-  onAudioStatus({ status }) {
+  handleAudioStatus({ status }) {
     this.setData({ isPlaying: status === 'playing' });
   },
 
-  onAudioTime({ current, duration }) {
+  handleAudioTime({ current, duration }) {
+    // 拖动中锁住进度条与时间文本，防止 time 事件和 bindchanging 打架回跳。
+    if (this.scrubbing) return;
     const app = getApp();
     const activeIdx = lyricIndexAt(this.data.lyricLines, current);
     this.setData({
@@ -70,7 +87,7 @@ Page({
     });
   },
 
-  onAudioError(err) {
+  handleAudioError(err) {
     const reason = err && (err.reason || err.code);
     const track = err.track || this.data.track;
     wx.showToast({
@@ -79,6 +96,12 @@ Page({
       duration: 2200,
     });
   },
+
+  // 兼容标注：以下 4 个不再是 app 直接调用的"协议方法"，仅为保留旧命名方便排错。
+  onAudioTrack(d) { this.handleAudioTrack(d); },
+  onAudioStatus(d) { this.handleAudioStatus(d); },
+  onAudioTime(d) { this.handleAudioTime(d); },
+  onAudioError(d) { this.handleAudioError(d); },
 
   loadLyric(track) {
     if (!track) return;
@@ -107,6 +130,16 @@ Page({
   },
 
   onSeek(e) {
-    getApp().seek(e.detail.value);
+    const app = getApp();
+    this.scrubbing = false;
+    // 松手位置比拖动过程更准，直接以此为准。
+    this.setData({ current: e.detail.value });
+    app.seek(e.detail.value);
+  },
+
+  onSliderChanging(e) {
+    // 表示拖动开始/进行中， time 事件不再覆盖进度。
+    this.scrubbing = true;
+    this.setData({ current: e.detail.value });
   },
 });

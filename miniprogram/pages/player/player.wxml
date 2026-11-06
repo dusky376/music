@@ -15,6 +15,7 @@
       activeColor="#007aff"
       backgroundColor="rgba(0,0,0,0.08)"
       block-size="18"
+      bindchanging="onSliderChanging"
       bindchange="onSeek"
     />
     <view class="times"><text>{{currText}}</text><text>{{durText}}</text></view>

@@ -1,10 +1,42 @@
 import { Readable } from 'node:stream';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { pipeline } from 'node:stream/promises';
 import { CACHE_TTL, COOKIE, LEVELS, SECTIONS, UPSTREAM } from './config.js';
-import { del, stats, wrap } from './cache.js';
+import { del, delPrefix, stats, wrap } from './cache.js';
 
 const UA = 'PureTone/1.0 (+local personal player)';
 const UPSTREAM_TIMEOUT = 9000;
+
+const COOKIE_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '.login-cookie');
+
+// —— 运行时登录态 ——
+// 优先级：环境变量 > 扫码登录（写到 .login-cookie，仅本机回环，已加入 .gitignore）。
+let runtimeCookie = COOKIE;
+if (!runtimeCookie) {
+  try {
+    runtimeCookie = fs.readFileSync(COOKIE_FILE, 'utf8').trim() || COOKIE;
+  } catch {
+    runtimeCookie = COOKIE;
+  }
+}
+
+function setRuntimeCookie(value) {
+  runtimeCookie = value || '';
+  try {
+    if (runtimeCookie) fs.writeFileSync(COOKIE_FILE, runtimeCookie, 'utf8');
+    else fs.rmSync(COOKIE_FILE, { force: true });
+  } catch {
+    // 磁盘不可用时只保留内存态，重启重新扫码即可。
+  }
+  // 登录态变化会让同一首歌的取流结果不同，音频缓存整体失效。
+  delPrefix('audio:');
+}
+
+export function loginState() {
+  return { logged: Boolean(runtimeCookie), source: COOKIE ? 'env' : runtimeCookie ? 'qr' : 'none' };
+}
 
 export class ApiError extends Error {
   constructor(code, message, status = 502) {
@@ -49,7 +81,7 @@ export async function upstream(path, params = {}, options = {}) {
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined && value !== null) url.searchParams.set(key, String(value));
   }
-  const cookie = options.cookie ?? COOKIE;
+  const cookie = options.cookie ?? runtimeCookie;
   if (cookie) url.searchParams.set('cookie', cookie);
 
   const controller = new AbortController();
@@ -208,21 +240,18 @@ function levelChain(level) {
 export async function getTrackUrl(id, { fee = 0, level = 'standard' } = {}) {
   if (!/^\d+$/.test(String(id))) throw new ApiError('BAD_ID', '歌曲 id 不合法', 400);
 
-  if (COOKIE) {
+  if (runtimeCookie) {
     let lastReason = 'no_copyright';
     for (const quality of levelChain(level)) {
       try {
-        const data = await upstream(
-          '/song/url/v1',
-          { id, level: quality, encodeType: quality === 'lossless' ? 'flac' : 'mp3' },
-          { cookie: COOKIE }
-        );
+        const data = await upstream('/song/url/v1', {
+          id,
+          level: quality,
+          encodeType: quality === 'lossless' ? 'flac' : 'mp3',
+        });
         if (Number(data?.code) === -462 || Number(data?.code) === 301) {
-          return {
-            url: null,
-            reason: 'risk_control',
-            message: '登录状态已失效，请重新扫码登录',
-          };
+          setRuntimeCookie('');
+          throw new ApiError('RISK_CONTROL', '登录状态已失效，请重新扫码登录', 401);
         }
         const item = data?.data?.[0];
         if (item?.url) {
@@ -238,6 +267,7 @@ export async function getTrackUrl(id, { fee = 0, level = 'standard' } = {}) {
         }
         if (item?.freeTrialInfo) lastReason = 'vip_required';
       } catch (error) {
+        if (error?.code === 'RISK_CONTROL') throw error;
         lastReason = error.code === 'UPSTREAM_TIMEOUT' ? 'network' : 'no_copyright';
       }
     }
@@ -276,6 +306,14 @@ export async function getTrackUrl(id, { fee = 0, level = 'standard' } = {}) {
 
 async function resolveAudioUrl(id) {
   return wrap(`audio:${id}`, CACHE_TTL.audio, async () => {
+    // 已登录：直接走完整音源接口拿 CDN 地址（https，可试听/完整播放）。
+    if (runtimeCookie) {
+      const info = await getTrackUrl(id, { level: 'exhigh' });
+      if (info.url) return info.url;
+      throw new ApiError('NO_AUDIO', info.message || '该歌曲暂无可用音源', 404);
+    }
+
+    // 匿名：免费外链兜底链。
     const target = `https://music.163.com/song/media/outer/url?id=${encodeURIComponent(id)}.mp3`;
 
     let res = await fetch(target, {
@@ -347,6 +385,58 @@ export async function proxyAudio(id, req, res) {
     return;
   }
   await pipeline(Readable.fromWeb(upstreamRes.body), res);
+}
+
+// —— 扫码登录（复用 uni-netease 二维码接口，全程本地回环）——
+
+/** 创建二维码：{ key, qrimg(dataURL) }；过期或失败按 ApiError 抛出。 */
+export async function loginQrCreate() {
+  const keyData = await upstream('/login/qr/key', { timestamp: Date.now() }, { cookie: '' });
+  const key = keyData?.data?.unikey || keyData?.unikey || keyData?.code;
+  if (!key) throw new ApiError('LOGIN_QR', '上游未返回登录 key', 502);
+  const qr = await upstream('/login/qr/create', { key, qrimg: 1, timestamp: Date.now() }, { cookie: '' });
+  const qrimg = qr?.data?.qrimg || qr?.qrimg || '';
+  return { key, qrimg };
+}
+
+/**
+ * 轮询二维码状态：
+ * 800 过期 / 801 等待扫码 / 802 已扫码待确认 / 200 或 803 登录成功。
+ */
+export async function loginQrCheck(key) {
+  if (!/^[0-9a-zA-Z-]+$/.test(String(key || ''))) throw new ApiError('BAD_KEY', 'key 不合法', 400);
+  const data = await upstream('/login/qr/check', { key, timestamp: Date.now() }, { cookie: '' });
+  const code = Number(data?.code ?? data?.data?.code);
+  let status = 'waiting';
+  if (code === 800) status = 'expired';
+  else if (code === 802) status = 'scanned';
+  else if (code === 200 || code === 803) status = 'success';
+  else if (code !== 801) status = `code_${code}`;
+
+  if (status === 'success') {
+    const cookieStr = data?.cookie || data?.data?.cookie || '';
+    if (cookieStr) {
+      const musicU = String(cookieStr).match(/MUSIC_U=([^;\s]+)/)?.[1];
+      setRuntimeCookie(musicU ? `MUSIC_U=${musicU}` : String(cookieStr).trim());
+    }
+    let nickname = '';
+    try {
+      const account = await upstream('/user/account');
+      nickname = String(account?.profile?.nickname || '');
+    } catch {
+      nickname = '';
+    }
+    return { status, nickname };
+  }
+  if (!/^(expired|scanned|waiting)$/.test(status) && data?.message) {
+    throw new ApiError('LOGIN_QR_CHECK', String(data.message), 502);
+  }
+  return { status };
+}
+
+export function logout() {
+  setRuntimeCookie('');
+  return { ok: true };
 }
 
 export function sectionsMeta() {

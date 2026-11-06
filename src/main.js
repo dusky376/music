@@ -1,7 +1,9 @@
 import { loadSettings, store } from './core/state.js';
+import { formatTime } from './core/format.js';
 import * as player from './core/player.js';
 import { initAmbient } from './ui/ambient.js';
 import { initImmersive } from './ui/immersive.js';
+import { initLogin } from './ui/login.js';
 import { initLyrics } from './ui/lyrics.js';
 import { initNav } from './ui/nav.js';
 import { initPlayerbar } from './ui/playerbar.js';
@@ -52,11 +54,23 @@ function boot() {
   initPlayerbar();
   initQueue();
   initImmersive();
+  initLogin();
   initSearch();
   initShortcuts();
 
   player.init();
-  player.restore();
+  const restored = player.restore();
+  if (restored && restored.position > 5) {
+    // 一次性轻提示：告诉他"上次听到哪里了"，一键续播，不打扰。
+    setTimeout(() => {
+      showToast(
+        `上次听到《${restored.track.name}》${formatTime(restored.position)}`,
+        5200,
+        'default',
+        { label: '继续播放', onClick: () => player.toggle() }
+      );
+    }, 1500);
+  }
   initNav();
 
   window.addEventListener('offline', () => showToast('网络已断开，正在显示可用的缓存', 3200));

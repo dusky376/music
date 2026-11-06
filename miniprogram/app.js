@@ -30,11 +30,36 @@ App({
   },
 
   _emit(name, detail) {
-    // 简版事件：当前页面自行订阅 getPlayer() 挂回调。
+    // 全局订阅表：谁要持续收事件就得 subscribe（页面在 onLoad 订、onUnload 退）。
+    const subs = this._listeners[name];
+    if (subs && subs.size) {
+      for (const fn of subs) {
+        try {
+          fn(detail);
+        } catch (error) {
+          console.error(`[audio:${name}] 订阅回调出错`, error);
+        }
+      }
+    }
+    // 兼容旧约定：当前页面实现 onAudioXxx 方法时仍然推送一次。
     const page = getCurrentPages().slice(-1)[0];
-    if (page && typeof page[`onAudio${name[0].toUpperCase()}${name.slice(1)}`] === 'function') {
+    if (page && typeof page[`onAudio${name[0].toUpperCase()}${name.slice(1)}`] === 'function' && !(page._subscribed && page._subscribed.has(name))) {
       page[`onAudio${name[0].toUpperCase()}${name.slice(1)}`](detail);
     }
+  },
+
+  /**
+   * 订阅全局音频事件。
+   * @returns {Function} 取消订阅函数（页面 onUnload 时调用，防泄漏）。
+   */
+  subscribe(name, fn) {
+    if (!this._listeners[name]) this._listeners[name] = new Set();
+    this._listeners[name].add(fn);
+    return () => this._listeners[name].delete(fn);
+  },
+
+  unsubscribe(name, fn) {
+    this._listeners[name]?.delete(fn);
   },
 
   _setStatus(status) {

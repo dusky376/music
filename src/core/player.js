@@ -440,6 +440,23 @@ export function removeAt(index) {
   return true;
 }
 
+/** 队列拖拽重排：挪到 from → to，整体 index 语义不变。 */
+export function move(from, to) {
+  const total = store.playQueue.length;
+  if (!Number.isInteger(from) || !Number.isInteger(to)) return false;
+  if (from === to || from < 0 || to < 0 || from >= total || to >= total) return false;
+  const [track] = store.playQueue.splice(from, 1);
+  store.playQueue.splice(to, 0, track);
+  let currentIndex = store.currentIndex;
+  if (currentIndex === from) currentIndex = to;
+  else if (from < currentIndex && to >= currentIndex) currentIndex -= 1;
+  else if (from > currentIndex && to <= currentIndex) currentIndex += 1;
+  store.currentIndex = currentIndex;
+  emit('player:queue', { queue: store.playQueue, index: currentIndex });
+  saveResume();
+  return true;
+}
+
 export function restore() {
   const saved = loadJSON(KEYS.resume, null);
   if (!saved || !saved.track || !Number.isFinite(saved.savedAt)) return null;

@@ -13,7 +13,7 @@ import {
   toggleMute,
   toggleShuffle,
 } from '../core/player.js';
-import { isFavorited, store, toggleFavorite } from '../core/state.js';
+import { isFavorited, saveSettings, store, toggleFavorite } from '../core/state.js';
 import { showToast } from './toast.js';
 
 const FALLBACK = '/assets/cover.svg';
@@ -281,6 +281,7 @@ function bindButtons() {
   refs.modalNext?.addEventListener('click', next);
   refs.shuffle?.addEventListener('click', toggleShuffle);
   refs.muteBtn?.addEventListener('click', toggleMute);
+  bindQualityMenu();
   refs.fav?.addEventListener('click', (event) => {
     event.stopPropagation();
     if (!store.currentTrack) {
@@ -288,6 +289,69 @@ function bindButtons() {
       return;
     }
     toggleFavorite(store.currentTrack);
+  });
+}
+
+function bindQualityMenu() {
+  const button = document.getElementById('qualityBtn');
+  const menu = document.getElementById('qualityMenu');
+  if (!button || !menu) return;
+
+  const refresh = () => {
+    for (const item of menu.querySelectorAll('.quality-item')) {
+      const selected = item.dataset.quality === store.quality;
+      item.classList.toggle('active', selected);
+      item.setAttribute('aria-checked', String(selected));
+    }
+  };
+
+  const close = () => {
+    menu.hidden = true;
+    button.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('click', onDocClick);
+    document.removeEventListener('keydown', onEsc);
+  };
+  const onDocClick = (event) => {
+    if (!menu.contains(event.target) && event.target !== button && !button.contains(event.target)) close();
+  };
+  const onEsc = (event) => {
+    if (event.key === 'Escape') {
+      event.stopPropagation();
+      close();
+      button.focus({ preventScroll: true });
+    }
+  };
+
+  button.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const willOpen = menu.hidden;
+    menu.hidden = !willOpen;
+    button.setAttribute('aria-expanded', String(willOpen));
+    if (willOpen) {
+      refresh();
+      document.addEventListener('click', onDocClick);
+      document.addEventListener('keydown', onEsc);
+    } else {
+      close();
+    }
+  });
+  menu.addEventListener('click', (event) => {
+    const item = event.target.closest('.quality-item');
+    if (!item) return;
+    event.stopPropagation();
+    const nextQuality = item.dataset.quality;
+    const changed = nextQuality !== store.quality;
+    store.quality = nextQuality;
+    saveSettings();
+    refresh();
+    close();
+    if (changed) {
+      showToast({
+        standard: '已切换到标准音质，重新点歌后生效',
+        exhigh: '已切换到高品 320k，重新点歌后生效',
+        lossless: '已切换无损 FLAC（登录态生效，重新点歌）',
+      }[nextQuality] || '音质已更新', 2600);
+    }
   });
 }
 

@@ -1,5 +1,6 @@
 import { searchTracks } from '../core/api.js';
 import { on } from '../core/bus.js';
+import { loadJSON, saveJSON } from '../core/storage.js';
 import { store } from '../core/state.js';
 import { clearActive, restoreCurrentView, setScrollPosition } from './nav.js';
 import { renderTracklist, showEmpty, showError, showSkeleton } from './tracklist.js';
@@ -8,9 +9,13 @@ import { showToast } from './toast.js';
 const input = document.getElementById('searchInput');
 const capsule = document.getElementById('searchCapsule');
 const clearBtn = document.getElementById('searchClearBtn');
+const historyPanel = document.getElementById('searchHistoryPanel');
 const heroTitle = document.getElementById('heroTitle');
 const heroSubtitle = document.getElementById('heroSubtitle');
 const viewport = document.getElementById('viewportPanel');
+
+const HISTORY_KEY = 'pt_search_history';
+const HISTORY_MAX = 10;
 
 let debounceTimer = 0;
 let controller = null;
@@ -18,6 +23,107 @@ let requestToken = 0;
 let activeQuery = '';
 let composing = false;
 let scrollBeforeSearch = 0;
+
+const savedHistory = loadJSON(HISTORY_KEY, []);
+let historyList = Array.isArray(savedHistory)
+  ? savedHistory.filter((k) => typeof k === 'string' && k.trim()).slice(0, HISTORY_MAX)
+  : [];
+
+function saveHistory() {
+  saveJSON(HISTORY_KEY, historyList);
+}
+
+/** 写入搜索历史：去重后置顶，上限 HISTORY_MAX 条。 */
+function pushHistory(keyword) {
+  const value = String(keyword || '').trim();
+  if (!value) return;
+  historyList = [value, ...historyList.filter((item) => item !== value)].slice(0, HISTORY_MAX);
+  saveHistory();
+}
+
+function removeHistory(keyword) {
+  historyList = historyList.filter((item) => item !== keyword);
+  saveHistory();
+  renderHistory();
+}
+
+function clearAllHistory() {
+  historyList = [];
+  saveHistory();
+  hideHistoryPanel();
+}
+
+function renderHistory() {
+  if (!historyPanel) return;
+  historyPanel.replaceChildren();
+  if (!historyList.length) {
+    hideHistoryPanel();
+    return;
+  }
+  const header = document.createElement('div');
+  header.className = 'search-history-head';
+  const title = document.createElement('span');
+  title.textContent = '搜索历史';
+  const clearAll = document.createElement('button');
+  clearAll.type = 'button';
+  clearAll.className = 'search-history-clear';
+  clearAll.textContent = '清空';
+  clearAll.addEventListener('click', clearAllHistory);
+  header.append(title, clearAll);
+  historyPanel.appendChild(header);
+
+  for (const keyword of historyList) {
+    const row = document.createElement('div');
+    row.className = 'search-history-item';
+    row.setAttribute('role', 'option');
+    row.tabIndex = 0;
+    const text = document.createElement('span');
+    text.className = 'search-history-text';
+    text.textContent = keyword;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'search-history-remove';
+    remove.setAttribute('aria-label', `删除搜索历史：${keyword}`);
+    remove.textContent = '✕';
+    // mousedown 先于 blur，避免点击历史项时面板先失焦消失。
+    row.addEventListener('mousedown', (event) => event.preventDefault());
+    row.addEventListener('click', (event) => {
+      event.stopPropagation();
+      if (event.target === remove) return;
+      hideHistoryPanel();
+      if (input) input.value = keyword;
+      runSearch(keyword);
+    });
+    remove.addEventListener('click', (event) => {
+      event.stopPropagation();
+      removeHistory(keyword);
+    });
+    row.append(text, remove);
+    historyPanel.appendChild(row);
+  }
+}
+
+function showHistoryPanel() {
+  if (!historyPanel || !historyList.length) return;
+  renderHistory();
+  historyPanel.hidden = false;
+  input?.setAttribute('aria-expanded', 'true');
+}
+
+function hideHistoryPanel() {
+  if (!historyPanel) return;
+  historyPanel.hidden = true;
+  input?.setAttribute('aria-expanded', 'false');
+}
+
+function maybeToggleHistoryPanel() {
+  const keyword = input?.value.trim() || '';
+  if (!input || keyword) {
+    hideHistoryPanel();
+    return;
+  }
+  showHistoryPanel();
+}
 
 function updateClearState() {
   capsule?.classList.toggle('has-content', Boolean(input?.value.trim()));
@@ -85,6 +191,7 @@ function resetSearch() {
   activeQuery = '';
   if (input) input.value = '';
   updateClearState();
+  hideHistoryPanel();
   restoreCurrentView();
   setScrollPosition(store.currentViewKey, scrollBeforeSearch);
 }
@@ -112,10 +219,16 @@ export function initSearch() {
     if (composing) return;
     onInput();
   });
+  input?.addEventListener('focus', maybeToggleHistoryPanel);
+  // blur 延迟：给 click 历史项留出触发窗口（历史项已用 mousedown 防抖动）。
+  input?.addEventListener('blur', () => setTimeout(hideHistoryPanel, 120));
   input?.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {
       event.preventDefault();
       if (debounceTimer) clearTimeout(debounceTimer);
+      const keyword = input.value.trim();
+      // 只有回车主动搜索才写历史；防抖的边输边搜不写。
+      pushHistory(keyword);
       runSearch(input.value);
     } else if (event.key === 'Escape') {
       event.preventDefault();
@@ -124,6 +237,12 @@ export function initSearch() {
     }
   });
   clearBtn?.addEventListener('click', resetSearch);
+  // 点击面板外关闭
+  document.addEventListener('click', (event) => {
+    if (historyPanel?.hidden) return;
+    if (capsule?.contains(event.target)) return;
+    hideHistoryPanel();
+  });
   on('search:reset', ({ silent } = {}) => {
     abortSearch();
     if (debounceTimer) clearTimeout(debounceTimer);
@@ -131,6 +250,7 @@ export function initSearch() {
     activeQuery = '';
     if (input && input.value) input.value = '';
     updateClearState();
+    hideHistoryPanel();
     if (!silent) showToast('已退出搜索', 1200);
   });
   updateClearState();

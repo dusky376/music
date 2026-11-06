@@ -15,13 +15,15 @@
 
 ## 快速开始
 
+双击 **`start-server.bat`**（推荐）：启动本地服务 → 等健康检查通过 → 自动打开 `http://127.0.0.1:8787`。重复双击不会二次启动；`stop-server.bat` 一键停止。
+
 ```powershell
 cd E:\workspace\music
-npm start          # 或 node server/index.js
-# 打开 http://127.0.0.1:8787
+.\start-server.bat       # 或 npm start；/nobrowser 参数可不弹浏览器
 ```
 
 - `npm run check`：对全部 JS 做语法检查。
+- `npm test`：零依赖测试（缓存/LRC 解析/格式化/音轨标准化），`node tests/run.mjs`。
 - 可选环境变量：`PORT`（默认 8787）、`HOST`（默认 127.0.0.1）、`NETEASE_COOKIE`（配置后走完整音源接口）、`NETEASE_API`（上游代理地址）、`WARM=0`（关闭预热）。
 
 ## 目录结构
@@ -29,23 +31,30 @@ npm start          # 或 node server/index.js
 ```
 music/
 ├─ index.html            # 页面壳
-├─ assets/               # 封面兜底图等静态资源
+├─ manifest.webmanifest  # PWA 清单
+├─ assets/               # 封面兜底图、PWA 图标（pwa.svg）
 ├─ server/               # Node 后端（零依赖）
 │  ├─ index.js           # 路由、静态服务、安全头
-│  ├─ netease.js         # 上游适配、缓存编排、音频代理、预热
-│  ├─ cache.js           # 内存 TTL + in-flight 去重
+│  ├─ netease.js         # 上游适配、缓存编排、音频代理、登录态、预热
+│  ├─ cache.js           # 内存 TTL + in-flight 去重 + 前缀失效
 │  └─ config.js          # 板块/歌单 ID、TTL、端口
 ├─ src/                  # 原生前端（ES Modules）
 │  ├─ main.js            # 入口装配
 │  ├─ core/              # bus / store / player（状态机）/ api / storage
-│  └─ ui/                # nav / tracklist / playerbar / lyrics / immersive / queue / search...
+│  └─ ui/                # nav / tracklist / playerbar / lyrics / immersive / queue / search / login / similar...
+├─ tests/run.mjs         # 缓存/LRC/格式化/normalizeTrack 单测
+├─ start-server.bat      # 一键启动（GBK + CRLF，勿改编码）
+├─ stop-server.bat       # 一键停止
 ├─ docs/ARCH.md          # 架构说明
 ├─ docs/API.md           # 本地接口文档
+├─ miniprogram/          # 微信小程序端（原生，复用同一后端）
 └─ 踩坑与复利.md          # 本项目问题与经验记录
 ```
 
 ## 已知边界
 
-- 匿名模式下 VIP / 付费歌曲不可播放（上游需要登录态）；配置 `NETEASE_COOKIE` 后按无损→标准自动降级。
-- 歌词/板块冷请求依赖上游速度（0.7–5s），缓存命中后近乎瞬时。
-- 仅枚举单曲/歌手/专辑搜索，不支持歌单搜索；登录、歌单管理暂未实现（接口已验证可行，见踩坑日志）。
+- 匿名模式下 VIP / 付费歌曲不可播放；**侧栏底部"扫码登录网易云"**后即可完整播放（凭据只存本机 `server/.login-cookie`），支持音质选择（标准/320k/无损，登录态下按级别自动降级）。
+- 歌词/板块冷请求依赖上游速度（0.7–5s），缓存命中后近乎瞬时；上游高峰期可能整体超时（`start-server.bat` 前端会显示"二维码拉取失败"，稍后重试）。
+- 仅枚举单曲/歌手/专辑搜索，不支持歌单搜索；歌单管理暂未实现（接口已验证可行，见踩坑日志）。
+- PWA 已可"添加到主屏幕"（manifest + 图标 + 主题色）；暂无离线 Service Worker。
+- 扫码登录的"确认成功"分支需真实手机扫码验证，逻辑已按 800/801/802/200|803 状态机实现。

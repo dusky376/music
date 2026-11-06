@@ -1,7 +1,8 @@
 import { getSection, peekSection, prefetchSection } from '../core/api.js';
 import { emit, on } from '../core/bus.js';
 import { playAll } from '../core/player.js';
-import { store } from '../core/state.js';
+import { saveSettings, store } from '../core/state.js';
+import { isLogged } from './login.js';
 import {
   renderTracklist,
   showEmpty,
@@ -18,11 +19,59 @@ const sidebar = document.getElementById('sidebarPanel');
 const mobileMenuBtn = document.getElementById('mobileMenuBtn');
 const sidebarBackdrop = document.getElementById('sidebarBackdrop');
 const navLinks = [...document.querySelectorAll('.nav-link[data-key]')];
+const playableFilterBtn = document.getElementById('playableFilterBtn');
 
 const scrollPositions = new Map();
 let lastNavKey = store.currentViewKey || 'top_19723756';
 let controller = null;
 let requestToken = 0;
+
+/** 匿名模式下 fee 1/4（VIP/付费）不可播；本次会话里已失败过的同样筛掉。 */
+function playableList(list) {
+  if (!store.filterPlayable) return list;
+  return list.filter(
+    (track) => !track.vip && !track.paid && !store.unavailable.has(String(track.id))
+  );
+}
+
+function isPlayable(track) {
+  return Boolean(track) && !track.vip && !track.paid && !store.unavailable.has(String(track.id));
+}
+
+function hasPlayableHint(list) {
+  // 列表里有真实可播的歌时才显示筛选开关，避免空板块上出现无意义按钮。
+  return list.some(isPlayable);
+}
+
+let filterAutoTuned = false;
+
+/**
+ * 用户没手动开过关筛选时，按登录态给默认值：
+ * 未登录默认"只看可播放"（少让用户踩 VIP 挫败），登录后默认全显。
+ * 设置里已存在该字段的，尊重用户选择。
+ */
+function initFilterDefault() {
+  if (filterAutoTuned) return;
+  filterAutoTuned = true;
+  try {
+    const raw = localStorage.getItem('pt_settings');
+    if (raw && typeof JSON.parse(raw)?.filterPlayable === 'boolean') return;
+    if (!playableFilterBtn?.hasAttribute('aria-pressed') || playableFilterBtn.getAttribute('aria-pressed') === 'false') {
+      store.filterPlayable = !isLogged();
+      saveSettings();
+    }
+  } catch {
+    filterAutoTuned = false;
+  }
+  syncFilterButton();
+}
+
+function syncFilterButton(totalList) {
+  if (playableFilterBtn) {
+    playableFilterBtn.setAttribute('aria-pressed', String(store.filterPlayable));
+    playableFilterBtn.classList.toggle('active', store.filterPlayable);
+  }
+}
 
 function navFor(key) {
   return navLinks.find((link) => link.dataset.key === key) || null;
@@ -58,31 +107,49 @@ function renderLocal(key, link) {
   const source = isFavorites ? store.favorites : store.history;
   store.playlist = source.slice();
   const title = link?.dataset.title || (isFavorites ? '我喜欢的音乐' : '最近播放');
-  const subtitle = source.length
-    ? `${source.length} 首 · ${link?.dataset.sub || ''}`
+  const visibleList = playableList(source);
+  const subtitle = visibleList.length
+    ? `${visibleList.length} 首 · ${link?.dataset.sub || ''}`
     : link?.dataset.sub || '';
   setTitle(title, subtitle);
-  if (!source.length) {
+  syncFilterButton();
+  if (!visibleList.length) {
     showEmpty(
       isFavorites ? '还没有喜欢的歌曲' : '还没有播放记录',
-      isFavorites ? '在列表里点一下爱心，歌就会留在这里。' : '播放过的歌曲会自动出现在这里。'
+      store.filterPlayable && source.length
+        ? '筛选只看可播放后，列表里暂时没有符合的歌曲，可以关掉筛选看看全部。'
+        : isFavorites
+          ? '在列表里点一下爱心，歌就会留在这里。'
+          : '播放过的歌曲会自动出现在这里。'
     );
   } else {
-    renderTracklist(source);
+    renderTracklist(visibleList);
   }
   restoreScroll(key);
 }
 
 function renderData(data, { preserveScroll = false } = {}) {
   store.playlist = Array.isArray(data.tracks) ? data.tracks : [];
-  setTitle(data.title || '音乐', data.subtitle || '');
+  const visibleList = playableList(store.playlist);
+  setTitle(
+    data.title || '音乐',
+    visibleList.length && visibleList.length !== store.playlist.length
+      ? `${data.subtitle || ''}（可播放 ${visibleList.length}/${store.playlist.length}）`
+      : data.subtitle || ''
+  );
   if (!store.playlist.length) {
     showEmpty('这个板块暂时没有歌曲', '换一个板块，或者稍后再试。', {
       label: '重新加载',
       onClick: () => loadView(store.currentViewKey, { force: true, skeleton: true }),
     });
+  } else if (!visibleList.length) {
+    showEmpty(
+      '这个板块都是 VIP / 付费歌曲',
+      '当前登录态下没有可直接播放的曲目，可以关掉"只看可播放"再选。',
+      { label: '关闭筛选', onClick: togglePlayableFilter }
+    );
   } else {
-    renderTracklist(store.playlist);
+    renderTracklist(visibleList);
   }
   if (preserveScroll) restoreScroll(store.currentViewKey);
 }
@@ -180,6 +247,15 @@ export function restoreCurrentView() {
   if (link) loadView(link.dataset.key);
 }
 
+function togglePlayableFilter() {
+  store.filterPlayable = !store.filterPlayable;
+  saveSettings();
+  showToast(store.filterPlayable ? '已开启"只看可播放"' : '已显示全部歌曲', 1800);
+  loadView(store.currentViewKey, { force: false });
+}
+
+
+
 export function setScrollPosition(key, top) {
   if (!key) return;
   scrollPositions.set(key, Math.max(0, Number(top) || 0));
@@ -210,6 +286,8 @@ function schedulePrefetch() {
 }
 
 export function initNav() {
+  playableFilterBtn?.addEventListener('click', togglePlayableFilter);
+  initFilterDefault();
   navLinks.forEach((link) => {
     link.tabIndex = 0;
     link.addEventListener('click', handleNavClick);

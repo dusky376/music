@@ -535,6 +535,24 @@
   }
 }
 
+/* —— 触控目标：移动端把小按钮的点击热区扩到 ≥40px，视觉不变 —— */
+@media (pointer: coarse), (max-width: 900px) {
+  .track-fav-btn,
+  .queue-item-remove,
+  .search-clear-btn {
+    position: relative;
+  }
+
+  .track-fav-btn::before,
+  .queue-item-remove::before,
+  .search-clear-btn::before {
+    content: '';
+    position: absolute;
+    inset: -9px;
+    border-radius: 50%;
+  }
+}
+
 @media (max-height: 660px) and (max-width: 900px) {
   .stage-left {
     display: none;

@@ -23,8 +23,14 @@
 - 歌词 LRC 解析 + 当前行高亮
 - VIP/付费：弹 toast 提示并自动跳下一首（与网页版策略一致）
 
+## 事件机制（v0.2）
+
+- `app.js` 提供 `subscribe(name, fn)` / `unsubscribe(name, fn)` 全局订阅表；页面在 `onLoad` 订阅、`onUnload` 退订，多页面并存皆可收事件。
+- 兼容保留旧"当前页 onAudioXxx"兜底推送（未订阅的旧页面不受影响）。
+- 播放器 slider 增加 `bindchanging` 拖动锁：拖动中 `time` 事件不覆盖进度，松手（`bindchange`）后才 seek。
+
 ## 已知限制
 
 - 真机调试须让手机与电脑同网段，`BASE` 改成电脑内网 IP；
 - 后台播放需要 `requiredBackgroundModes: ["audio"]`（验证后端连通后加）；
-- `onShow` 后未重置 slider 中点拖动中的状态，快速拖动小概率回跳（下一版用 `onChanging` 优化）。
+- `onShow` 后未重置 slider 中点拖动中的状态，快速拖动小概率回跳（已修复：`bindchanging` 拖动锁 + `onShow` 重置 scrubbing）。

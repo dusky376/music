@@ -6,13 +6,37 @@
 { "error": { "code": "UPSTREAM_TIMEOUT", "message": "上游超时" } }
 ```
 
+启动方式：双击 `music/start-server.bat`（一键启动 + 自动打开页面），或 `npm start`。停止用 `stop-server.bat`。
+
 ## GET /api/health
 
 健康检查。返回：
 
 ```json
-{ "ok": true, "upstream": "https://apis.netstart.cn/music", "cookie": false, "cache": { "entries": 12, "inflight": 0 }, "uptime": 320 }
+{ "ok": true, "upstream": "https://apis.netstart.cn/music", "cookie": false, "login": { "logged": false, "source": "none" }, "cache": { "size": 12, "hits": 0, "misses": 0, "inflight": 0 }, "uptime": 320 }
 ```
+
+`login.logged` 为 true 时，VIP/付费曲目可走完整音源；`source`：`env`（NETEASE_COOKIE）/ `qr`（扫码）/ `none`。
+
+## 扫码登录
+
+凭据只存**本机**：内存 + `server/.login-cookie`（已加入 .gitignore），不落数据库。登录/登出会整体清空音频缓存（`delPrefix('audio:')`）。
+
+| 接口 | 方法 | 说明 |
+| --- | --- | --- |
+| `/api/login/status` | GET | `{ "logged": false, "source": "none" }` |
+| `/api/login/qr` | GET | 生成二维码 `{ "key": "<uuid>", "qrimg": "data:image/png;base64,…" }` |
+| `/api/login/qr/check?key=` | GET | 轮询状态，见下 |
+| `/api/logout` | POST | `{ "ok": true }`，清除本机凭据 |
+
+`check` 的状态机（8 秒一轮、前端 2 秒轮询一次）：
+
+- `801` → `{ "status": "waiting" }` 等待扫码
+- `802` → `{ "status": "scanned" }` 已扫码，请在手机上确认
+- `800` → `{ "status": "expired" }` 二维码过期（前端露出刷新按钮）
+- `200` / `803` → `{ "status": "success", "nickname": "…" }` 成功；服务端从 cookie 提取 `MUSIC_U` 并 `/user/account` 拉昵称
+
+设置 `NETEASE_COOKIE` 环境变量优先于扫码（`source: "env"`），扫码态只在其缺失时生效。
 
 ## GET /api/sections
 
@@ -26,7 +50,7 @@
 { "key": "top_19723756", "title": "飙升榜", "subtitle": "…", "tracks": [ { "id": "3453304463", "name": "降温", "artist": "Zzh", "album": "…", "duration": 199, "cover": "https://…300y300", "fee": 0, "vip": false, "paid": false, "mv": 0 } ] }
 ```
 
-`id` / `name` / `artist` / `album` / `duration` / `cover`(https, 300y300) / `fee` / `vip` / `paid` / `mv`。`vip` 来自 `fee ∈ {1,4,8}`，`paid` 为 `fee === 16`，均在服务端 `normalizeTrack` 统一。
+`id` / `name` / `artist` / `album` / `duration` / `cover`(https, 300y300) / `fee` / `vip` / `paid` / `mv`。`vip` 来自 `fee === 1`，`paid` 为 `fee === 4`，均在服务端 `normalizeTrack` 统一。
 
 ## GET /api/search?q=关键词&limit=60
 
@@ -39,7 +63,7 @@
 - `fee ∈ {1,4}`（VIP/付费）→ `{ "url": null, "reason": "login_required" }`
 - 其它 → `{ "url": "/api/audio/:id" }`（相对路径，`<audio>` 直接可用）
 
-配置 `NETEASE_COOKIE` 后走 `/song/url/v1`，按 `level` 逐级降级（lossless→exhigh→higher→standard），风控码 `-462/301` 时返回 `{"url":null,"reason":"vip_required|risk_control"}`。
+登录态（env 或扫码）下走 `/song/url/v1`，按 `level` 逐级降级（lossless→exhigh→higher→standard），风控码 `-462/301` 时清空登录态并返回 `{"url":null,"reason":"risk_control"}`（HTTP 401），前端提示重新扫码。
 
 ## GET /api/track/:id/lyric
 
@@ -68,6 +92,6 @@
 
 ## 静态资源
 
-- `/`、`/src/**`、`/assets/**` 允许 GET/HEAD，带 `Cache-Control: no-cache`；
+- `/`、`/src/**`、`/assets/**`、`/manifest.webmanifest` 允许 GET/HEAD，带 `Cache-Control: no-cache`；
 - 其余路径 404 JSON；路径穿越返回 403。
 - CSP（概要）：`default-src 'self'; img-src 'self' https: data:; media-src 'self' https: http:; style-src 'self' 'unsafe-inline' …`，封面/头像走 https。

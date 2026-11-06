@@ -28,6 +28,17 @@ export function set(key, value, ttl) {
 
 export function del(key) {
   store.delete(key);
+  inflight.delete(key);
+}
+
+/** 按 key 前缀批量失效（登录态变化时清音频缓存等）。 */
+export function delPrefix(prefix) {
+  for (const key of store.keys()) {
+    if (key.startsWith(prefix)) store.delete(key);
+  }
+  for (const key of inflight.keys()) {
+    if (key.startsWith(prefix)) inflight.delete(key);
+  }
 }
 
 export async function wrap(key, ttl, fn) {

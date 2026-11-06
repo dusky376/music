@@ -172,6 +172,22 @@ export async function getHealth() {
   return request('/api/health', { timeout: 4000 });
 }
 
+export function getLoginStatus() {
+  return request('/api/login/status', { timeout: 8000 });
+}
+
+export function createLoginQr() {
+  return request('/api/login/qr', { timeout: 15000 });
+}
+
+export function checkLoginQr(key) {
+  return request(`/api/login/qr/check?key=${encodeURIComponent(key)}`, { timeout: 15000 });
+}
+
+export function logoutServer() {
+  return request('/api/logout', { timeout: 8000 });
+}
+
 async function dedupe(key, factory) {
   if (inflight.has(key)) return inflight.get(key);
   const task = Promise.resolve()

@@ -345,3 +345,48 @@
 .dock-track-brief:focus-visible {
   outline-offset: 0;
 }
+
+/* —— 音质选择菜单 —— */
+.dock-utilities {
+  position: relative;
+}
+
+.quality-menu {
+  position: absolute;
+  right: -8px;
+  bottom: calc(100% + 10px);
+  z-index: 60;
+  min-width: 132px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-glass);
+  backdrop-filter: blur(24px) saturate(150%);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+  box-shadow: var(--shadow-md);
+}
+
+.quality-item {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-sub);
+  font-size: 12px;
+  font-weight: 550;
+  text-align: left;
+  cursor: pointer;
+}
+
+.quality-item:hover {
+  background: rgba(0, 122, 255, 0.08);
+  color: var(--text-main);
+}
+
+.quality-item.active {
+  background: rgba(0, 122, 255, 0.12);
+  color: var(--accent);
+  font-weight: 700;
+}

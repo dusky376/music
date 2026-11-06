@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "node --watch server/index.js",
     "start": "node server/index.js",
-    "check": "node --check server/index.js && node --check server/netease.js && node --check server/cache.js && node --check src/main.js"
+    "check": "node --check server/index.js && node --check server/netease.js && node --check server/cache.js && node --check src/main.js",
+    "test": "node tests/run.mjs"
   },
   "engines": {
     "node": ">=18"
