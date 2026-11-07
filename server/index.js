@@ -226,7 +226,20 @@ async function handleApi(req, res, url) {
   }
 }
 
-const server = http.createServer(async (req, res) => {
+// 双绑定：127.0.0.1（桌面浏览器）+ 本机内网 IPv4（真机预览经局域网访问）。
+// 只绑探测到的那一枚内网 IP，比 0.0.0.0 更收敛；探测失败（没有内网）就只挂 loopback。
+import os from 'node:os';
+
+function lanIPv4() {
+  for (const ifaces of Object.values(os.networkInterfaces())) {
+    for (const iface of ifaces) {
+      if (iface.family === 'IPv4' && !iface.internal) return iface.address;
+    }
+  }
+  return null;
+}
+
+async function handleRequest(req, res) {
   let url;
   try {
     url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
@@ -246,7 +259,9 @@ const server = http.createServer(async (req, res) => {
   }
 
   await serveStatic(req, res, url.pathname);
-});
+}
+
+const server = http.createServer(handleRequest);
 
 server.on('error', (error) => {
   if (error.code === 'EADDRINUSE') {
@@ -259,13 +274,25 @@ server.on('error', (error) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`\n  PureTone 已启动：http://${HOST}:${PORT}`);
-  console.log(`  上游：https://apis.netstart.cn/music`);
+  console.log(`  上游：${UPSTREAM}`);
   console.log(`  登录态：${COOKIE ? '已配置 NETEASE_COOKIE' : '未配置（匿名模式）'}`);
   console.log(`  缓存：内存 TTL；预热：${WARM ? '开' : '关'}\n`);
   if (WARM) {
     warmSections().catch((error) => console.error('[warm]', error));
   }
 });
+
+// 真机预览支持：同一个 handler 再挂内网 IPv4（探测到的那一枚），失败不影响主监听。
+const lan = lanIPv4();
+if (lan && lan !== HOST) {
+  const lanServer = http.createServer(handleRequest);
+  lanServer.on('error', (error) => {
+    console.error(`[lan] ${lan}:${PORT} 绑定失败（真机预览不可用）：${error.code}`);
+  });
+  lanServer.listen(PORT, lan, () => {
+    console.log(`  真机预览：http://${lan}:${PORT}\n`);
+  });
+}
 
 function shutdown() {
   console.log('\n正在关闭…');
