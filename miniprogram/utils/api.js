@@ -1,10 +1,11 @@
 // 后端地址：本地调试直接跑 http://127.0.0.1:8787；
-// 真机预览需要改成电脑的局域网 IP（http://电脑IP:8787，且手机电脑同一 WiFi）；
+// 真机预览必须改成电脑的局域网 IP（下面 LAN_IP 生成，且手机电脑同一 WiFi）；
 // 正式上线必须换成 https 已备案域名。
-const DEV = 'http://127.0.0.1:8787';
-const PROD = 'https://your-domain.example'; // TODO: 上线时替换
+const LAN_IP = '192.168.4.12'; // 电脑局域网 IP（真机预览用；电脑 IP 变了就改这里）
+const DEV = 'http://127.0.0.1:8787';       // 模拟器/工具内
+const REAL_DEVICE = `http://${LAN_IP}:8787`; // 真机预览
 
-const BASE = DEV;
+const BASE = REAL_DEVICE;
 
 function request(path, { method = 'GET', data = null, timeout = 9000 } = {}) {
   return new Promise((resolve, reject) => {
