@@ -10,6 +10,7 @@ import {
   getLyric,
   getSection,
   getSimilar,
+  getAccountProfile,
   getTrackUrl,
   loginQrCheck,
   loginQrCreate,
@@ -205,6 +206,10 @@ async function handleApi(req, res, url) {
     }
     if (pathname === '/api/logout' && req.method === 'POST') {
       sendJSON(res, 200, logout());
+      return;
+    }
+    if (pathname === '/api/user' && req.method === 'GET') {
+      sendJSON(res, 200, await getAccountProfile());
       return;
     }
 

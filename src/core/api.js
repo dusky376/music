@@ -176,6 +176,10 @@ export function getLoginStatus() {
   return request('/api/login/status', { timeout: 8000 });
 }
 
+export function getUser() {
+  return request('/api/user', { timeout: 10000 });
+}
+
 export function createLoginQr() {
   return request('/api/login/qr', { timeout: 15000 });
 }

@@ -333,19 +333,19 @@
   align-items: center;
   justify-content: space-between;
   color: var(--text-sub);
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 .shortcut-help kbd {
-  min-width: 20px;
-  height: 20px;
+  min-width: 22px;
+  height: 22px;
+  font-size: 12px;
   display: inline-grid;
   place-items: center;
   border: 1px solid var(--border);
   border-radius: 5px;
   background: var(--bg-soft);
   font-family: inherit;
-  font-size: 10px;
   font-weight: 650;
 }
 

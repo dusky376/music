@@ -30,8 +30,10 @@ function setRuntimeCookie(value) {
   } catch {
     // 磁盘不可用时只保留内存态，重启重新扫码即可。
   }
-  // 登录态变化会让同一首歌的取流结果不同，音频缓存整体失效。
+  // 登录态变化会让同一首歌的取流结果不同，音频缓存整体失效；
+  // 账号板块（每日推荐/喜欢的歌）也随登录态变化重取。
   delPrefix('audio:');
+  delPrefix('section:');
 }
 
 export function loginState() {
@@ -135,6 +137,48 @@ async function resolveCategoryPlaylist(cat) {
   });
 }
 
+// —— 账号板块：每日推荐 / 我喜欢的歌曲 / 账号资料（都需要登录 cookie）——
+
+const ACCOUNT_SECTIONS = {
+  daily: { type: 'account', title: '每日推荐', subtitle: '根据你的口味每天更新' },
+  likes: { type: 'account', title: '我喜欢的歌曲', subtitle: '网易云账号云端的收藏' },
+};
+
+export async function getAccountProfile() {
+  if (!runtimeCookie) return { logged: false, profile: null };
+  const data = await upstream('/user/account');
+  const profile = data?.profile;
+  if (!profile) return { logged: false, profile: null };
+  return {
+    logged: true,
+    profile: {
+      uid: profile.userId,
+      nickname: profile.nickname || '已登录',
+      avatar: toHttps(profile.avatarUrl || ''),
+      vip: Number(profile.vipType || 0) > 0,
+    },
+  };
+}
+
+export async function getDailySongs() {
+  const data = await upstream('/recommend/songs');
+  if (data?.code && data.code !== 200) {
+    throw new ApiError('LOGIN_REQUIRED', '登录后可用每日推荐', 401);
+  }
+  return (data?.data?.dailySongs || []).slice(0, 80).map(normalizeTrack).filter(Boolean);
+}
+
+export async function getLikedSongs() {
+  const account = await upstream('/user/account');
+  const uid = account?.profile?.userId;
+  if (!uid) throw new ApiError('LOGIN_REQUIRED', '登录后可见你的收藏', 401);
+  const playlists = await upstream('/user/playlist', { uid, limit: 5 });
+  // specialType 5 正是"我喜欢的音乐"私密歌单；兜底取第一张
+  const likes = playlists?.playlist?.find((p) => p.specialType === 5) || playlists?.playlist?.[0];
+  if (!likes?.id) return [];
+  return getPlaylistTracks(String(likes.id), 60);
+}
+
 export async function getPlaylistTracks(playlistId, limit = 80) {
   return wrap(`tracks:${playlistId}:${limit}`, CACHE_TTL.tracks, async () => {
     const data = await upstream('/playlist/track/all', { id: playlistId, limit });
@@ -148,6 +192,23 @@ export async function getPlaylistTracks(playlistId, limit = 80) {
 }
 
 export async function getSection(key) {
+  const accountConfig = ACCOUNT_SECTIONS[key];
+  if (accountConfig) {
+    return wrap(`section:${key}`, CACHE_TTL.section, async () => {
+      if (!runtimeCookie) throw new ApiError('LOGIN_REQUIRED', '该板块需要登录网易云账号', 401);
+      const tracks = key === 'daily' ? await getDailySongs() : await getLikedSongs();
+      return {
+        key,
+        type: accountConfig.type,
+        title: accountConfig.title,
+        subtitle: accountConfig.subtitle,
+        playlistId: '',
+        playlistName: accountConfig.title,
+        tracks,
+        updatedAt: Date.now(),
+      };
+    });
+  }
   const config = SECTIONS[key];
   if (!config) throw new ApiError('UNKNOWN_SECTION', '未知板块', 404);
 
@@ -327,9 +388,11 @@ async function resolveAudioUrl(id) {
     // 匿名：免费外链兜底链。
     const target = `https://music.163.com/song/media/outer/url?id=${encodeURIComponent(id)}.mp3`;
 
+    // 匿名：免费外链兜底链。探测请求都要带超时，CDN 卡死不能拖死连接。
     let res = await fetch(target, {
       method: 'HEAD',
       redirect: 'follow',
+      signal: AbortSignal.timeout(10000),
       headers: { 'user-agent': UA },
     });
     let type = res.headers.get('content-type') || '';
@@ -338,6 +401,7 @@ async function resolveAudioUrl(id) {
     // 少数 CDN 不支持 HEAD，退回 Range 探测。
     res = await fetch(target, {
       redirect: 'follow',
+      signal: AbortSignal.timeout(10000),
       headers: { 'user-agent': UA, Range: 'bytes=0-0' },
     });
     type = res.headers.get('content-type') || '';
@@ -356,6 +420,8 @@ export async function proxyAudio(id, req, res) {
     fetch(url, {
       method: req.method === 'HEAD' ? 'HEAD' : 'GET',
       redirect: 'follow',
+      // CDN 偶发挂起：探测+拉流全程限时，防止 socket 被永久占用。
+      signal: AbortSignal.timeout(20000),
       headers: {
         'user-agent': UA,
         ...(range ? { Range: range } : {}),

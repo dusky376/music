@@ -377,7 +377,7 @@
 }
 
 .switcher-btn {
-  height: 30px;
+  height: 44px;
   padding: 0 18px;
   border-radius: 999px;
   color: var(--text-sub);
@@ -388,6 +388,15 @@
 
 .switcher-btn:hover {
   color: var(--text-main);
+}
+
+/* 侧栏登录入口的账号头像 */
+.login-avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex: 0 0 auto;
 }
 
 .switcher-btn.active {

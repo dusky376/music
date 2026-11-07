@@ -2,6 +2,7 @@ import {
   checkLoginQr,
   createLoginQr,
   getLoginStatus,
+  getUser,
   logoutServer,
 } from '../core/api.js';
 import { on } from '../core/bus.js';
@@ -19,6 +20,8 @@ const qrMaskText = document.getElementById('loginQrMaskText');
 const qrRefreshBtn = document.getElementById('loginQrRefreshBtn');
 const statusEl = document.getElementById('loginStatus');
 const logoutBtn = document.getElementById('logoutBtn');
+const loginAvatar = document.getElementById('loginAvatar');
+const navAccountLinks = [...document.querySelectorAll('.nav-account')];
 
 const STATUS_TEXT = {
   waiting: '等待扫码…（用网易云音乐 App 扫一扫）',
@@ -52,6 +55,31 @@ function refreshEntry() {
     loginBtnText.textContent = state.nickname ? `已登录：${state.nickname}` : '扫码登录网易云';
   }
   logoutBtn?.toggleAttribute('hidden', !state.nickname);
+  // 账号板块（每日推荐 / 我喜欢的歌曲）只对登录用户显示。
+  for (const link of navAccountLinks) link.toggleAttribute('hidden', !state.nickname);
+  if (loginAvatar) {
+    if (state.avatar) {
+      loginAvatar.src = state.avatar;
+      loginAvatar.toggleAttribute('hidden', false);
+    } else {
+      loginAvatar.toggleAttribute('hidden', true);
+    }
+  }
+}
+
+// 登记成功后拉一次资料（头像/昵称），失败静默（昵称兜底已在 state 里）。
+async function syncProfile() {
+  try {
+    const data = await getUser();
+    const profile = data?.profile;
+    if (!profile) return;
+    // 服务端昵称权威：即使本地有"已登录"占位也要覆盖为真名。
+    state = { ...state, nickname: profile.nickname || state.nickname || '已登录', avatar: profile.avatar || '' };
+    saveJSON('pt_login', state);
+    refreshEntry();
+  } catch {
+    // 拉资料失败不影响登录态本身。
+  }
 }
 
 function stopPolling() {
@@ -77,6 +105,7 @@ async function startPolling(key, token) {
         state = { ...state, nickname: result.nickname || '已登录' };
         saveJSON('pt_login', state);
         refreshEntry();
+        syncProfile();
         setStatus('登录成功');
         showToast(result.nickname ? `欢迎，${result.nickname}` : '登录成功', 2600);
         stopPolling();
@@ -164,10 +193,14 @@ export function initLogin() {
   // 启动时对齐一次服务端登录态（例如换浏览器打开时）。
   getLoginStatus()
     .then((info) => {
-      if (info?.logged && !state.nickname) {
-        state = { ...state, nickname: state.nickname || '已登录' };
-        saveJSON('pt_login', state);
-        refreshEntry();
+      if (info?.logged) {
+        // 有服务端登录态就同步资料：老用户补头像/真昵称，本地昵称只是占位。
+        if (!state.nickname) {
+          state = { ...state, nickname: '已登录' };
+          saveJSON('pt_login', state);
+          refreshEntry();
+        }
+        syncProfile();
       } else if (!info?.logged && state.nickname) {
         state = { nickname: '' };
         saveJSON('pt_login', state);

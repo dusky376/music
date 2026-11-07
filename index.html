@@ -162,11 +162,21 @@
             <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
             <span>最近播放</span>
           </div>
+          <!-- 账号板块：登录后由 login.js 显示 -->
+          <div class="nav-link nav-account" data-key="daily" data-title="每日推荐" data-sub="根据你的口味每天更新" tabindex="0" hidden>
+            <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            <span>每日推荐</span>
+          </div>
+          <div class="nav-link nav-account" data-key="likes" data-title="我喜欢的歌曲" data-sub="网易云账号云端的收藏" tabindex="0" hidden>
+            <svg class="icon" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/><line x1="12" y1="9" x2="12" y2="15"/><line x1="9" y1="12" x2="15" y2="12"/></svg>
+            <span>我喜欢的歌曲</span>
+          </div>
         </div>
       </nav>
 
       <div class="sidebar-foot">
         <button class="login-entry" id="loginBtn" type="button" aria-haspopup="dialog">
+          <img id="loginAvatar" class="login-avatar" alt="" hidden />
           <span id="loginBtnText">扫码登录网易云</span>
         </button>
         <button class="shortcut-help" id="shortcutHelpBtn" type="button">
