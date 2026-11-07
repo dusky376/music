@@ -176,7 +176,10 @@ export async function getLikedSongs() {
   // specialType 5 正是"我喜欢的音乐"私密歌单；兜底取第一张
   const likes = playlists?.playlist?.find((p) => p.specialType === 5) || playlists?.playlist?.[0];
   if (!likes?.id) return [];
-  return getPlaylistTracks(String(likes.id), 60);
+  // 全量拉取：trackCount 就是真实收藏数，按它取（上限 3000 兜底）。
+  const total = Math.min(Number(likes.trackCount) || 0, 3000);
+  const tracks = total > 0 ? await getPlaylistTracks(String(likes.id), total) : [];
+  return { tracks, total: Number(likes.trackCount) || tracks.length };
 }
 
 export async function getPlaylistTracks(playlistId, limit = 80) {
@@ -196,12 +199,22 @@ export async function getSection(key) {
   if (accountConfig) {
     return wrap(`section:${key}`, CACHE_TTL.section, async () => {
       if (!runtimeCookie) throw new ApiError('LOGIN_REQUIRED', '该板块需要登录网易云账号', 401);
-      const tracks = key === 'daily' ? await getDailySongs() : await getLikedSongs();
+      let tracks;
+      let subtitle = accountConfig.subtitle;
+      if (key === 'daily') {
+        // 网易云官方每日只发 ~30 首，如实标注总量。
+        tracks = await getDailySongs();
+        subtitle = `${tracks.length} 首 · 官方每日推送`;
+      } else {
+        const liked = await getLikedSongs();
+        tracks = liked.tracks;
+        subtitle = `云端收藏 ${liked.total} 首`;
+      }
       return {
         key,
         type: accountConfig.type,
         title: accountConfig.title,
-        subtitle: accountConfig.subtitle,
+        subtitle,
         playlistId: '',
         playlistName: accountConfig.title,
         tracks,
