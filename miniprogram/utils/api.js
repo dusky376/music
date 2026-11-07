@@ -1,7 +1,8 @@
-// 本地后端地址：开发用本机回环；上线换成 https 域名。
-// 注意：小程序只允许 https（开发可勾选"不校验合法域名"临时放行 http://127.0.0.1）。
+// 后端地址：本地调试直接跑 http://127.0.0.1:8787；
+// 真机预览需要改成电脑的局域网 IP（http://电脑IP:8787，且手机电脑同一 WiFi）；
+// 正式上线必须换成 https 已备案域名。
 const DEV = 'http://127.0.0.1:8787';
-const PROD = 'https://your-domain.example'; // TODO: 部署后替换
+const PROD = 'https://your-domain.example'; // TODO: 上线时替换
 
 const BASE = DEV;
 
@@ -19,7 +20,7 @@ function request(path, { method = 'GET', data = null, timeout = 9000 } = {}) {
           reject({ code: 'HTTP_' + res.statusCode, message: (res.data && res.data.error && res.data.error.message) || `HTTP ${res.statusCode}` });
         }
       },
-      fail: (err) => reject({ code: 'NETWORK', message: err.errMsg || '网络请求失败' }),
+      fail: (err) => reject({ code: 'NETWORK', message: err.errMsg || '网络连接失败' }),
     });
   });
 }
@@ -29,19 +30,27 @@ const api = {
   section: (key) => request(`/api/section/${encodeURIComponent(key)}`),
   search: (q, limit = 60) => request(`/api/search?q=${encodeURIComponent(q)}&limit=${limit}`),
   lyric: (id) => request(`/api/track/${id}/lyric`),
+  // 登录态与个人资料（服务端共享登录态：网页版扫码后，小程序直接可用）
+  user: () => request('/api/user', { timeout: 10000 }),
 };
 
-/** 板块清单（与 server/config.js 的 SECTIONS key 对齐）。 */
+/** 公共板块清单（与 server/config.js 的 SECTIONS key 对应） */
 const SECTIONS = [
   { key: 'top_19723756', title: '飙升榜' },
   { key: 'top_3778678', title: '热歌榜' },
   { key: 'cat_华语', title: '华语精选' },
   { key: 'cat_欧美', title: '欧美精选' },
   { key: 'cat_摇滚', title: '摇滚现场' },
-  { key: 'cat_学习', title: '学习陪伴' },
+  { key: 'cat_学习', title: '学习氛围' },
 ];
 
-/** 简易 LRC 解析：[mm:ss.xx] → { t, text }。 */
+/** 账号板块：需要服务端已登录（网页版扫码）；未登录时不可见 */
+const ACCOUNT_SECTIONS = [
+  { key: 'daily', title: '每日推荐', account: true },
+  { key: 'likes', title: '我喜欢的歌曲', account: true },
+];
+
+/** 把 LRC 文本解析为 [{ t, text }]，按时间升序。 */
 function parseLyrics(raw) {
   return String(raw || '')
     .split(/\r?\n/)
@@ -57,7 +66,7 @@ function parseLyrics(raw) {
     .sort((a, b) => a.t - b.t);
 }
 
-/** 当前时间对应的歌词行下标（二分）。 */
+/** 给定时间返回对应歌词行下标（二分）。 */
 function lyricIndexAt(lines, t) {
   let lo = 0;
   let hi = lines.length - 1;
@@ -70,4 +79,4 @@ function lyricIndexAt(lines, t) {
   return lo;
 }
 
-module.exports = { BASE, api, SECTIONS, parseLyrics, lyricIndexAt };
+module.exports = { BASE, api, SECTIONS, ACCOUNT_SECTIONS, parseLyrics, lyricIndexAt };

@@ -10,6 +10,7 @@
     "backgroundColor": "#f7f7f9",
     "backgroundTextStyle": "dark"
   },
+  "requiredBackgroundModes": ["audio"],
   "style": "v2",
   "sitemapLocation": "sitemap.json"
 }

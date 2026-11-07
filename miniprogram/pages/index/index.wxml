@@ -1,4 +1,8 @@
 <view class="wrap">
+  <view class="account-row">
+    <image wx:if="{{account.avatar}}" class="avatar" src="{{account.avatar}}" mode="aspectFill" />
+    <text class="account-text">{{account.logged ? account.nickname : '未登录 · 网页版扫码后这里多出每日推荐'}}</text>
+  </view>
   <scroll-view class="chips" scroll-x enable-flex>
     <view
       wx:for="{{sections}}"

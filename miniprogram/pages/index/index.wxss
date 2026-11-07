@@ -2,6 +2,27 @@
   padding: 20rpx 24rpx 40rpx;
 }
 
+/* 顶部账号状态行：头像 + 昵称/提示 */
+.account-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 16rpx;
+  min-height: 44rpx;
+}
+
+.avatar {
+  width: 44rpx;
+  height: 44rpx;
+  border-radius: 50%;
+  margin-right: 12rpx;
+  flex: 0 0 auto;
+}
+
+.account-text {
+  color: #8a8a92;
+  font-size: 22rpx;
+}
+
 .chips {
   white-space: nowrap;
   margin-bottom: 20rpx;
