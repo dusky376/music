@@ -26,6 +26,7 @@ Page({
   switchSection(e) {
     const key = e.currentTarget.dataset.key;
     if (key === this.data.activeKey) return;
+    this.userTouched = true; // 用户手动切过板块后，账号同步不再自动跳页
     this.setData({ activeKey: key });
     this.loadSection(key);
   },
@@ -73,18 +74,24 @@ Page({
       .then((data) => {
         const profile = data?.profile;
         const logged = Boolean(data?.logged && profile);
+        const sections = logged ? [...ACCOUNT_SECTIONS, ...SECTIONS] : SECTIONS;
         this.setData({
           account: {
             logged,
             nickname: logged ? profile.nickname || '已登录' : '',
             avatar: logged ? profile.avatar || '' : '',
           },
-          sections: logged ? [...SECTIONS, ...ACCOUNT_SECTIONS] : SECTIONS,
+          sections,
         });
-        // 如果当前停在被移除的板块上，回落到第一个基础板块
         if (!logged && ACCOUNT_SECTIONS.some((s) => s.key === this.data.activeKey)) {
           this.setData({ activeKey: SECTIONS[0].key });
           this.loadSection(SECTIONS[0].key);
+          return;
+        }
+        // 登录成功且用户没手动换过页：默认落在"每日推荐"（账号内容在最前面）
+        if (logged && this.data.activeKey === SECTIONS[0].key && !this.userTouched) {
+          this.setData({ activeKey: ACCOUNT_SECTIONS[0].key });
+          this.loadSection(ACCOUNT_SECTIONS[0].key);
         }
       })
       .catch(() => {
