@@ -1,6 +1,6 @@
 # PureTone · 本地网易云播放器
 
-原生 HTML / CSS / ES Modules 前端 + Node（零依赖）本地代理后端的网页音乐播放器。数据来自网易云公共代理 `apis.netstart.cn/music`，音频由本地后端转流，规避混合内容与 CORS 问题。
+原生 HTML / CSS / ES Modules 前端 + Node（零依赖）本地代理后端的网页音乐播放器。数据上游支持**本地自托管 NeteaseCloudMusicApi**（默认，`start-server.bat` 自动编排）或公共代理回退；音频由本地后端转流，规避混合内容与 CORS 问题。
 
 ## 特性
 
@@ -15,12 +15,14 @@
 
 ## 快速开始
 
-双击 **`start-server.bat`**（推荐）：启动本地服务 → 等健康检查通过 → 自动打开 `http://127.0.0.1:8787`。重复双击不会二次启动；`stop-server.bat` 一键停止。
+双击 **`start-server.bat`**（推荐）：自动启动两个服务——①本地网易云 API（`netease-api\`，端口 3000，NeteaseCloudMusicApi 4.32.0 自托管，替代公共代理 `apis.netstart.cn`，高峰期不再超时）→ ②PureTone 后端（端口 8787，`NETEASE_API=http://127.0.0.1:3000`），健康检查通过后自动开页面。重复双击不会二次启动；`stop-server.bat` 一键停两个服务。
 
 ```powershell
 cd E:\workspace\music
 .\start-server.bat       # 或 npm start；/nobrowser 参数可不弹浏览器
 ```
+
+还原公共上游：不设 `NETEASE_API` 环境变量直接 `npm start` 即可（`server/config.js` 内置回退）。
 
 - `npm run check`：对全部 JS 做语法检查。
 - `npm test`：零依赖测试（缓存/LRC 解析/格式化/音轨标准化），`node tests/run.mjs`。
@@ -43,7 +45,8 @@ music/
 │  ├─ core/              # bus / store / player（状态机）/ api / storage
 │  └─ ui/                # nav / tracklist / playerbar / lyrics / immersive / queue / search / login / similar...
 ├─ tests/run.mjs         # 缓存/LRC/格式化/normalizeTrack 单测
-├─ start-server.bat      # 一键启动（GBK + CRLF，勿改编码）
+├─ netease-api/          # 本地上游 NeteaseCloudMusicApi（端口 3000，高峰超时的解法）
+├─ start-server.bat      # 一键启动（3000 + 8787 双进程编排，勿改编码）
 ├─ stop-server.bat       # 一键停止
 ├─ docs/ARCH.md          # 架构说明
 ├─ docs/API.md           # 本地接口文档

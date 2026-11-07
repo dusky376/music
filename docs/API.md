@@ -13,7 +13,16 @@
 健康检查。返回：
 
 ```json
-{ "ok": true, "upstream": "https://apis.netstart.cn/music", "cookie": false, "login": { "logged": false, "source": "none" }, "cache": { "size": 12, "hits": 0, "misses": 0, "inflight": 0 }, "uptime": 320 }
+{ "ok": true, "upstream": "http://127.0.0.1:3000", "cookie": false, "login": { "logged": false, "source": "none" }, "cache": { "size": 12, "hits": 0, "misses": 0, "inflight": 0 }, "uptime": 320 }
+```
+
+`upstream` 是 `NETEASE_API` 环境变量（默认公共代理 `https://apis.netstart.cn/music`）。推荐本地自托管：
+
+```powershell
+cd music\netease-api
+npm install --registry https://registry.npmmirror.com   # 安装 NeteaseCloudMusicApi@4.32.0
+node node_modules\NeteaseCloudMusicApi\app.js           # 监听 127.0.0.1:3000（HOST=127.0.0.1）
+# 之后 NETEASE_API=http://127.0.0.1:3000 启动 8787 后端；start-server.bat 已自动编排
 ```
 
 `login.logged` 为 true 时，VIP/付费曲目可走完整音源；`source`：`env`（NETEASE_COOKIE）/ `qr`（扫码）/ `none`。

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import { COOKIE, HOST, PORT, ROOT, WARM } from './config.js';
+import { COOKIE, HOST, PORT, ROOT, UPSTREAM, WARM } from './config.js';
 import {
   ApiError,
   getComments,
@@ -128,7 +128,7 @@ async function handleApi(req, res, url) {
     if (pathname === '/api/health') {
       sendJSON(res, 200, {
         ok: true,
-        upstream: 'https://apis.netstart.cn/music',
+        upstream: UPSTREAM,
         cookie: Boolean(COOKIE),
         login: loginState(),
         cache: stats(),

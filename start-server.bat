@@ -1,29 +1,53 @@
 @echo off
 chcp 65001 >nul
-title PureTone ±¾µØ·þÎñ
+title PureTone æœ¬åœ°æœåŠ¡
 cd /d "%~dp0"
 
 where node >nul 2>nul
 if errorlevel 1 (
-  echo [´íÎó] Î´¼ì²âµ½ Node.js£¬ÇëÏÈ°²×° Node 18 »ò¸ü¸ß°æ±¾¡£
+  echo [é”™è¯¯] æœªæ£€æµ‹åˆ° Node.jsï¼Œè¯·å…ˆå®‰è£… Node 18 æˆ–æ›´é«˜ç‰ˆæœ¬ã€‚
   pause
   exit /b 1
 )
 
-rem ÒÑÓÐ·þÎñÔÚÅÜ£º²»ÖØ¸´Æô¶¯£¬Ö±½Ó´ò¿ªÒ³Ãæ
+set "LOCAL_API=http://127.0.0.1:3000"
+
+rem ç¬¬ä¸€æ­¥ï¼šæœ¬åœ°ç½‘æ˜“äº‘ APIï¼ˆç«¯å£ 3000ï¼‰ï¼Œæœªç›‘å¬åˆ™å¯åŠ¨
+netstat -ano | findstr ":3000" | findstr "LISTENING" >nul
+if errorlevel 1 (
+  echo [æç¤º] å¯åŠ¨æœ¬åœ°ç½‘æ˜“äº‘ APIï¼ˆç«¯å£ 3000ï¼‰...
+  start "Netease API" cmd /k "set HOST=127.0.0.1&& node netease-api\node_modules\NeteaseCloudMusicApi\app.js"
+) else (
+  echo [æç¤º] æœ¬åœ°ç½‘æ˜“äº‘ API å·²åœ¨è¿è¡Œã€‚
+)
+
+rem è½®è¯¢ 3000 ç«¯å£å°±ç»ªï¼Œæœ€å¤š 15 æ¬¡
+set /a api_tries=0
+:waitapi
+if %api_tries% gtr 0 ping -n 2 127.0.0.1 >nul
+netstat -ano | findstr ":3000" | findstr "LISTENING" >nul
+if not errorlevel 1 goto apiup
+set /a api_tries+=1
+if %api_tries% lss 15 goto waitapi
+echo [é”™è¯¯] æœ¬åœ° APIï¼ˆ3000ï¼‰æœªèƒ½å¯åŠ¨ï¼Œè¯·çœ‹ Netease API çª—å£çš„æ—¥å¿—ã€‚
+pause
+exit /b 1
+
+:apiup
+rem ç¬¬äºŒæ­¥ï¼šPureTone åŽç«¯ï¼ˆç«¯å£ 8787ï¼‰ï¼Œå·²åœ¨è·‘åˆ™ç›´æŽ¥å¼€é¡µé¢
 netstat -ano | findstr ":8787" | findstr "LISTENING" >nul
 if not errorlevel 1 (
-  echo [ÌáÊ¾] PureTone ÒÑÔÚÔËÐÐ¡£
+  echo [æç¤º] PureTone åŽç«¯å·²åœ¨è¿è¡Œã€‚
   if /i not "%~1"=="/nobrowser" start "" http://127.0.0.1:8787
   ping -n 2 127.0.0.1 >nul
   exit /b 0
 )
 
-echo ÕýÔÚÆô¶¯ PureTone ±¾µØ·þÎñ...
-echo ËµÃ÷£º·þÎñ´°¿Ú»áµ¥¶À´ò¿ª£»ÈÕÖ¾ÔÚÄÇ¸ö´°¿ÚÀï¿´£¬¹Ø±ÕÄÇ¸ö´°¿Ú¼´Í£Ö¹·þÎñ¡£
-start "PureTone Server" cmd /k node server/index.js
+echo æ­£åœ¨å¯åŠ¨ PureTone æœ¬åœ°æœåŠ¡ï¼ˆæŒ‡å‘æœ¬åœ° APIï¼‰...
+echo è¯´æ˜Žï¼šä¸¤ä¸ªæœåŠ¡çª—å£ä¼šå•ç‹¬æ‰“å¼€ï¼Œæ—¥å¿—åœ¨é‚£é‡Œçœ‹ï¼›å…³é—­æŸçª—å£=åœæ­¢å¯¹åº”æœåŠ¡ã€‚
+start "PureTone Server" cmd /k "set NETEASE_API=%LOCAL_API%&& node server/index.js"
 
-rem ÂÖÑ¯½¡¿µ¼ì²é£¬×î¶àµÈ 10 Ãë
+rem è½®è¯¢å¥åº·æ£€æŸ¥ï¼Œæœ€å¤š 10 æ¬¡
 set /a tries=0
 :waitup
 ping -n 2 127.0.0.1 >nul
@@ -31,11 +55,11 @@ curl -s http://127.0.0.1:8787/api/health >nul 2>nul
 if not errorlevel 1 goto opened
 set /a tries+=1
 if %tries% lss 10 goto waitup
-echo [¾¯¸æ] 10 ÃëÄÚÎ´ÄÜÈ·ÈÏ·þÎñ¾ÍÐ÷£¬¿ÉÊÖ¶¯´ò¿ª http://127.0.0.1:8787
+echo [é”™è¯¯] 10 ç§’å†…æœªç¡®è®¤æœåŠ¡å¯åŠ¨ï¼Œè¯·æ‰‹åŠ¨æ‰“å¼€ http://127.0.0.1:8787
 ping -n 2 127.0.0.1 >nul
 exit /b 1
 
 :opened
 if /i not "%~1"=="/nobrowser" start "" http://127.0.0.1:8787
-echo Íê³É£ºä¯ÀÀÆ÷ÒÑ´ò¿ª http://127.0.0.1:8787
+echo å®Œæˆï¼ŒæœåŠ¡å·²å°±ç»ª http://127.0.0.1:8787
 ping -n 2 127.0.0.1 >nul

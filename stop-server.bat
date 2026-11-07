@@ -1,16 +1,24 @@
 @echo off
 chcp 65001 >nul
-title Í£Ö¹ PureTone ·þÎñ
-rem ÕÒµ½¼àÌý 8787 µÄ½ø³Ì²¢½áÊø
+title åœæ­¢ PureTone æœåŠ¡
+cd /d "%~dp0"
+
 set found=0
+rem å…ˆåœ PureTone åŽç«¯ï¼ˆ8787ï¼‰
 for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8787" ^| findstr "LISTENING"') do (
   set found=1
-  echo ÕýÔÚ½áÊø½ø³Ì PID %%a
+  echo æ­£åœ¨ç»“æŸè¿›ç¨‹ PID %%aï¼ˆPureTone åŽç«¯ï¼‰
   taskkill /PID %%a /F >nul 2>nul
 )
+rem å†åœæœ¬åœ°ç½‘æ˜“äº‘ APIï¼ˆ3000ï¼‰
+for /f "tokens=5" %%b in ('netstat -ano ^| findstr ":3000" ^| findstr "LISTENING"') do (
+  set found=1
+  echo æ­£åœ¨ç»“æŸè¿›ç¨‹ PID %%bï¼ˆæœ¬åœ°ç½‘æ˜“äº‘ APIï¼‰
+  taskkill /PID %%b /F >nul 2>nul
+)
 if %found%==0 (
-  echo µ±Ç°Ã»ÓÐ PureTone ·þÎñÔÚÔËÐÐ¡£
+  echo å½“å‰æ²¡æœ‰ PureTone / æœ¬åœ° API åœ¨è¿è¡Œã€‚
 ) else (
-  echo ÒÑÍ£Ö¹¡£
+  echo å·²åœæ­¢ã€‚
 )
 ping -n 2 127.0.0.1 >nul
