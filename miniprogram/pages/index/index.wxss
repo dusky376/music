@@ -43,6 +43,19 @@
   color: #ffffff;
 }
 
+/* 封面加载失败（网易 CDN 404）时的灰色占位 */
+.cover-fallback {
+  background: #ececef;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fallback-note {
+  color: #b9b9c0;
+  font-size: 30rpx;
+}
+
 .hero {
   display: flex;
   align-items: center;

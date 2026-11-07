@@ -97,6 +97,14 @@ Page({
     this.playQueue(this.data.tracks, index);
   },
 
+  // 单曲封面在网易 CDN 404（封面被下架）时换灰色占位，不冒破图。
+  onCoverError(e) {
+    const index = Number(e.currentTarget.dataset.index);
+    const track = this.data.tracks[index];
+    if (!track || track.coverBroken) return;
+    this.setData({ [`tracks[${index}].coverBroken`]: true });
+  },
+
   onPlayAll() {
     if (!this.data.tracks.length) return;
     this.playQueue(this.data.tracks, 0);

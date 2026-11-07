@@ -30,7 +30,16 @@
       data-index="{{index}}"
       bindtap="onPlayRow"
     >
-      <image class="cover" src="{{item.cover}}" mode="aspectFill" lazy-load />
+      <image
+        wx:if="{{!item.coverBroken}}"
+        class="cover"
+        src="{{item.cover}}"
+        mode="aspectFill"
+        lazy-load
+        binderror="onCoverError"
+        data-index="{{index}}"
+      />
+      <view wx:else class="cover cover-fallback"><text class="fallback-note">♪</text></view>
       <view class="meta">
         <view class="name">{{item.name}}<text wx:if="{{item.vip}}" class="badge">VIP</text></view>
         <view class="artist">{{item.artist}} · {{item.album}}</view>
