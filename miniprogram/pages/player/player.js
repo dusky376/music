@@ -5,6 +5,8 @@ const ERROR_TEXT = {
   vip_required: '当前账号只能试听',
   no_copyright: '这首歌暂无版权音源',
   risk_control: '登录状态已失效',
+  none_playable: '队列里没有可播放的歌',
+  consecutive_failed: '连续失败已停止播放',
   NETWORK: '网络有点慢，歌曲没有加载出来',
 };
 

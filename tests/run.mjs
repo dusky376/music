@@ -206,6 +206,158 @@ await group('normalizeTrack', async () => {
   });
 });
 
+// —— miniprogram/app.js 事件总线与播放决策（真实回放，不用假 getApp 桩）——
+// 教训来源：此前 wx shim 里 getApp() 返回假的 subscribe 桩，没跑 app.js 真身，
+// 掩盖了 _listeners 未初始化导致 _emit/playAt 全体抛错的致命 bug。
+const { createRequire } = await import('node:module');
+const requireCjs = createRequire(new URL('./', import.meta.url)); // 锚定 tests/，跨包加载 miniprogram（type: commonjs）
+
+class FakeAudio {
+  constructor() { this.src = ''; this.cb = {}; }
+  _on(name, fn) { this.cb[name] = fn; return this; }
+  onCanplay(fn) { return this._on('canplay', fn); }
+  onPlay(fn) { return this._on('play', fn); }
+  onPause(fn) { return this._on('pause', fn); }
+  onStop(fn) { return this._on('stop', fn); }
+  onWaiting(fn) { return this._on('waiting', fn); }
+  onError(fn) { return this._on('error', fn); }
+  onEnded(fn) { return this._on('ended', fn); }
+  onTimeUpdate(fn) { return this._on('timeupdate', fn); }
+  fire(name, detail) { this.cb[name] && this.cb[name](detail); }
+  play() { this.played = (this.played || 0) + 1; }
+  pause() {}
+  stop() { this.stopped = (this.stopped || 0) + 1; }
+  seek() {}
+}
+
+const audioInstance = new FakeAudio();
+const app = {}; // App(options) 写入
+global.wx = { createInnerAudioContext: () => audioInstance };
+global.getCurrentPages = () => [];
+global.App = (options) => Object.assign(app, options);
+requireCjs('../miniprogram/app.js');
+
+const resetApp = () => {
+  app.globalData.queue = [];
+  app.globalData.index = -1;
+  app.globalData.status = 'idle';
+  app.failStreak = 0;
+  audioInstance.src = '';
+  audioInstance.cb = {};
+  audioInstance.stopped = 0;
+  audioInstance.played = 0;
+};
+
+await group('miniprogram/app', async () => {
+  await test('onLaunch 初始化音频并注册全部回调', () => {
+    resetApp();
+    app.onLaunch.call(app);
+    assert.ok(audioInstance.src === '', 'audio created');
+    for (const name of ['canplay', 'play', 'pause', 'stop', 'waiting', 'error', 'ended', 'timeupdate']) {
+      assert.ok(audioInstance.cb[name], `missing handler: ${name}`);
+    }
+  });
+
+  await test('subscribe/_emit 回环 + 退订', () => {
+    const got = [];
+    const dispose = app.subscribe.call(app, 'time', (d) => got.push(d));
+    app._emit.call(app, 'time', { current: 3, duration: 200 });
+    assert.equal(got.length, 1);
+    assert.equal(got[0].current, 3);
+    dispose();
+    app._emit.call(app, 'time', {});
+    assert.equal(got.length, 1, 'unsubscribe should stop events');
+  });
+
+  await test('切歌必须真的换 src（回归：_listeners 未初始化时这里炸掉）', () => {
+    resetApp();
+    app.globalData.queue = [
+      { id: '1', fee: 0, name: 'A' },
+      { id: '2', fee: 0, name: 'B' },
+      { id: '3', fee: 0, name: 'C' },
+    ];
+    audioInstance.src = 'http://x:8787/api/audio/1';
+    app.playAt.call(app, 2);
+    assert.ok(audioInstance.src.includes('/api/audio/3'), `src=${audioInstance.src}`);
+    assert.equal(app.globalData.index, 2);
+  });
+
+  await test('混合队列：点 VIP 歌自动落下一个可播首', () => {
+    resetApp();
+    app.globalData.queue = [
+      { id: '1', fee: 1, name: 'vip' },
+      { id: '2', fee: 0, name: 'free' },
+    ];
+    app.playAt.call(app, 0);
+    assert.equal(app.globalData.index, 1, 'auto landed on free track');
+    assert.ok(audioInstance.src.includes('/api/audio/2'));
+  });
+
+  await test('全 VIP 队列触发 none_playable 且 src 不变', () => {
+    resetApp();
+    app.globalData.queue = [
+      { id: '1', fee: 1 },
+      { id: '2', fee: 8 },
+    ];
+    audioInstance.src = 'keep-me';
+    const errors = [];
+    const disposeErr = app.subscribe.call(app, 'error', (d) => errors.push(d));
+    app.playAt.call(app, 0);
+    disposeErr();
+    assert.equal(errors.length, 1);
+    assert.equal(errors[0].reason, 'none_playable');
+    assert.equal(audioInstance.src, 'keep-me', 'src must not change');
+    assert.equal(app.globalData.index, -1);
+    assert.equal(app.globalData.status, 'idle');
+  });
+
+  await test('playNext/playPrev 双向环绕且跳过 VIP', () => {
+    resetApp();
+    app.globalData.queue = [
+      { id: '1', fee: 1 }, // VIP
+      { id: '2', fee: 0 },
+      { id: '3', fee: 0 },
+    ];
+    app.playAt.call(app, 1);
+    assert.equal(app.globalData.index, 1);
+    app.playNext.call(app, true);
+    assert.equal(app.globalData.index, 2, 'next wraps-free path');
+    app.playPrev.call(app);
+    assert.equal(app.globalData.index, 1, 'prev returns to track 2');
+    app.playPrev.call(app);
+    assert.equal(app.globalData.index, 2, 'prev over VIP wraps backward to last free');
+  });
+
+  await test('连续 3 次音频错误触发 consecutive_failed 并停止', () => {
+    resetApp();
+    app.globalData.queue = [
+      { id: '1', fee: 0 },
+      { id: '2', fee: 0 },
+      { id: '3', fee: 0 },
+    ];
+    const errors = [];
+    const disposeErr = app.subscribe.call(app, 'error', (d) => errors.push(d));
+    app.onLaunch.call(app); // failStreak 内部逻辑与回调绑定无关，重绑以便直接 fire
+    audioInstance.fire('error', { errMsg: 'boom1' });
+    audioInstance.fire('error', { errMsg: 'boom2' });
+    audioInstance.fire('error', { errMsg: 'boom3' });
+    disposeErr();
+    assert.ok(errors.length >= 1);
+    assert.equal(errors[errors.length - 1].reason, 'consecutive_failed');
+    assert.equal(app.globalData.status, 'idle', 'stopped after streak');
+    assert.ok(audioInstance.stopped >= 1, 'audio.stop() called');
+  });
+
+  await test('onPlay 成功清零 failStreak（失败链可恢复）', () => {
+    resetApp();
+    app.onLaunch.call(app);
+    audioInstance.fire('error', { errMsg: 'one' });
+    assert.equal(app.failStreak, 1);
+    audioInstance.fire('play');
+    assert.equal(app.failStreak, 0, 'success clears streak');
+  });
+});
+
 // 汇总
 console.log(`\n测试结果：${passed + failed} 项，通过 ${passed}，失败 ${failed}`);
 if (failed) {

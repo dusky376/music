@@ -4,6 +4,8 @@
 const { BASE } = require('./utils/api.js');
 
 App({
+  _listeners: {},
+
   globalData: {
     queue: [],       // 当前队列（Track[]）
     index: -1,       // 当前曲目下标
@@ -11,17 +13,21 @@ App({
   },
 
   audio: null,
+  failStreak: 0,
 
   onLaunch() {
     // 前台保活开关：后台切歌不依赖它，靠 onEnded 驱动。
     this.audio = wx.createInnerAudioContext({ useWebAudioImplement: false });
     this.audio.obeyMuteSwitch = false;
     this.audio.onCanplay(() => this._emit('canplay'));
-    this.audio.onPlay(() => this._setStatus('playing'));
+    this.audio.onPlay(() => {
+      this.failStreak = 0; // 播放成功，失败计数清零
+      this._setStatus('playing');
+    });
     this.audio.onPause(() => this._setStatus('paused'));
     this.audio.onStop(() => this._setStatus('paused'));
     this.audio.onWaiting(() => this._emit('waiting'));
-    this.audio.onError((err) => this._emit('error', err));
+    this.audio.onError((err) => this._playFailed(err));
     this.audio.onEnded(() => this.playNext(true));
     this.audio.onTimeUpdate(() => this._emit('time', {
       current: this.audio.currentTime || 0,
@@ -67,24 +73,50 @@ App({
     this._emit('status', { status });
   },
 
-  /** 队列中第 index 首歌（-1 表示空态）。 */
-  playAt(index) {
+  /**
+   * 从 start 起扫描队列，返回第一个可播（非 VIP/付费）的下标；找不到返回 -1。
+   * 向前扫描（含 start，环绕一圈），确定性替代旧的递归 playNext 兜底：
+   * 全 VIP 队列只扫一圈就停，绝不死循环。backward=true 时向队首方向扫（playPrev 用）。
+   */
+  nextPlayableIndex(start, backward = false) {
     const { queue } = this.globalData;
-    if (index < 0 || index >= queue.length) return;
-    const track = queue[index];
-    const fee = Number(track.fee) || 0;
-    if (fee === 1 || fee === 4 || fee === 8) {
-      this.globalData.index = index;
-      this._emit('error', { reason: 'login_required', track });
-      this.playNext(false);
+    const len = queue.length;
+    if (!len) return -1;
+    for (let step = 0; step < len; step += 1) {
+      const base = (((start % len) + len) % len + (backward ? len - step : step)) % len;
+      const fee = Number(queue[base].fee) || 0;
+      if (fee !== 1 && fee !== 4 && fee !== 8) return base;
+    }
+    return -1;
+  },
+
+  /** 播放指定下标（点到的歌不可播时静默落到下一个可播；全不可播则报错停止）。 */
+  playAt(index) {
+    this._start(index, false);
+  },
+
+  _start(start, backward) {
+    const { queue } = this.globalData;
+    if (!queue.length) return;
+    const target = this.nextPlayableIndex(start, backward);
+    if (target === -1) {
+      this.globalData.index = -1;
+      this._setStatus('idle');
+      this.audio.stop();
+      this._emit('error', { reason: 'none_playable', track: queue[start] });
       return;
     }
-    this.globalData.index = index;
+    const track = queue[target];
+    if (target !== start) {
+      // 点到的歌不可播：如实报错，然后落到可播目标
+      this._emit('error', { reason: 'login_required', track: queue[start] });
+    }
+    this.globalData.index = target;
     this._setStatus('paused'); // 切歌先归位，等 onPlay 再变 playing
     this.audio.stop();
     this.audio.src = `${BASE}/api/audio/${track.id}`;
     this.audio.play();
-    this._emit('track', { track, index, queue });
+    this._emit('track', { track, index: target, queue });
   },
 
   toggle() {
@@ -111,13 +143,34 @@ App({
 
   playNext(auto) {
     const { index, queue } = this.globalData;
-    this.playAt(index + 1 < queue.length ? index + 1 : 0);
-    // auto 留给后续做"连续失败停止"计数
+    if (!queue.length) return;
+    this._start((index + 1) % queue.length, false);
+    // auto=true 表示自然播完切下一首（auto 分支保留给后续策略）。
+    void auto;
   },
 
   playPrev() {
     const { index, queue } = this.globalData;
-    this.playAt(index > 0 ? index - 1 : queue.length - 1);
+    if (!queue.length) return;
+    this._start((index - 1 + queue.length) % queue.length, true);
+  },
+
+  /**
+   * 播放失败的统一入口（音频 onError 与上层协议错误都走这里）。
+   * 连续失败达到 3 次停止整条链路，避免"一首坏歌拖全队无限横跳"。
+   */
+  _playFailed(err) {
+    this.failStreak += 1;
+    if (this.failStreak >= 3) {
+      this.failStreak = 0;
+      this.globalData.index = -1;
+      this.globalData.status = 'idle';
+      this.audio.stop();
+      this._emit('error', { reason: 'consecutive_failed', count: 3, last: err });
+      return;
+    }
+    this._emit('error', err);
+    this.playNext(true);
   },
 
   seek(sec) {
