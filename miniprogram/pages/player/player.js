@@ -21,6 +21,7 @@ Page({
     lyricLines: [],
     lyricActive: -1,
     lyricError: '',
+    lyricInto: '',
   },
 
   onLoad() {
@@ -67,7 +68,7 @@ Page({
 
   handleAudioTrack({ track }) {
     this.scrubbing = false;
-    this.setData({ track, lyricLines: [], lyricActive: -1, lyricError: '' });
+    this.setData({ track, lyricLines: [], lyricActive: -1, lyricError: '', lyricInto: '' });
     this.loadLyric(track);
   },
 
@@ -80,13 +81,18 @@ Page({
     if (this.scrubbing) return;
     const app = getApp();
     const activeIdx = lyricIndexAt(this.data.lyricLines, current);
-    this.setData({
+    const patch = {
       current,
       duration: duration || this.data.duration,
       currText: app.fmt(current),
       durText: app.fmt(duration),
-      lyricActive: activeIdx === this.data.lyricActive ? this.data.lyricActive : activeIdx,
-    });
+    };
+    if (activeIdx !== this.data.lyricActive) {
+      // 高亮行变化：推 scroll-into-view 让歌词自动滚到当前句
+      patch.lyricActive = activeIdx;
+      patch.lyricInto = `lyr-${activeIdx}`;
+    }
+    this.setData(patch);
   },
 
   handleAudioError(err) {

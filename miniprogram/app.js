@@ -15,24 +15,39 @@ App({
   audio: null,
   failStreak: 0,
 
-  onLaunch() {
-    // 前台保活开关：后台切歌不依赖它，靠 onEnded 驱动。
-    this.audio = wx.createInnerAudioContext({ useWebAudioImplement: false });
-    this.audio.obeyMuteSwitch = false;
-    this.audio.onCanplay(() => this._emit('canplay'));
-    this.audio.onPlay(() => {
+  _createAudio() {
+    const audio = wx.createInnerAudioContext({ useWebAudioImplement: false });
+    audio.obeyMuteSwitch = false;
+    audio.onCanplay(() => this._emit('canplay'));
+    audio.onPlay(() => {
       this.failStreak = 0; // 播放成功，失败计数清零
       this._setStatus('playing');
     });
-    this.audio.onPause(() => this._setStatus('paused'));
-    this.audio.onStop(() => this._setStatus('paused'));
-    this.audio.onWaiting(() => this._emit('waiting'));
-    this.audio.onError((err) => this._playFailed(err));
-    this.audio.onEnded(() => this.playNext(true));
-    this.audio.onTimeUpdate(() => this._emit('time', {
-      current: this.audio.currentTime || 0,
-      duration: this.audio.duration || 0,
+    audio.onPause(() => this._setStatus('paused'));
+    audio.onStop(() => this._setStatus('paused'));
+    audio.onWaiting(() => this._emit('waiting'));
+    audio.onError((err) => this._playFailed(err));
+    audio.onEnded(() => this.playNext(true));
+    audio.onTimeUpdate(() => this._emit('time', {
+      current: audio.currentTime || 0,
+      duration: audio.duration || 0,
     }));
+    return audio;
+  },
+
+  onLaunch() {
+    this.audio = this._createAudio();
+  },
+
+  _teardownAudio() {
+    if (!this.audio) return;
+    for (const fn of ['stop', 'destroy']) {
+      try {
+        this.audio[fn]();
+      } catch (error) {
+        // destroy 时平台可能已回收，忽略
+      }
+    }
   },
 
   _emit(name, detail) {
@@ -115,7 +130,10 @@ App({
     }
     this.globalData.index = target;
     this._setStatus('paused'); // 切歌先归位，等 onPlay 再变 playing
-    this.audio.stop();
+    // 换源必须销毁重建实例：部分平台/DevTools 的 setter 换 src 会继承上一个音源的
+    // 播放位置，表现为"点下一首，接着上一首的秒数继续播"。重建保证从 0 开始。
+    this._teardownAudio();
+    this.audio = this._createAudio();
     this.audio.src = `${BASE}/api/audio/${track.id}`;
     this.audio.play();
     this._emit('track', { track, index: target, queue });

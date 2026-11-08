@@ -7,6 +7,23 @@
       <text class="artist">{{track.artist}}</text>
     </view>
 
+    <!-- 歌词在进度条上方；高亮行通过 scroll-into-view 自动滚动跟随 -->
+    <scroll-view
+      class="lyrics"
+      scroll-y
+      scroll-into-view="{{lyricInto}}"
+      scroll-with-animation
+    >
+      <view class="lyric-pad"></view>
+      <view
+        wx:for="{{lyricLines}}"
+        wx:key="time"
+        id="lyr-{{index}}"
+        class="lyric {{index === lyricActive ? 'lyric-active' : ''}}"
+      >{{item.text}}</view>
+      <view class="lyric-pad"></view>
+    </scroll-view>
+
     <slider
       class="progress"
       min="0"
@@ -25,15 +42,6 @@
       <view class="ctl-btn main {{isPlaying ? 'ic-pause' : 'ic-play'}}" bindtap="onToggle"></view>
       <view class="ctl-btn ic-next" bindtap="onNext"></view>
     </view>
-
-    <scroll-view class="lyrics" scroll-y>
-      <view wx:if="{{lyricError}}" class="empty">{{lyricError}}</view>
-      <view
-        wx:for="{{lyricLines}}"
-        wx:key="index"
-        class="lyric {{index === lyricActive ? 'lyric-active' : ''}}"
-      >{{item.text}}</view>
-    </scroll-view>
   </block>
 
   <view wx:else class="empty">从首页选一首歌开始播放</view>

@@ -227,6 +227,7 @@ class FakeAudio {
   play() { this.played = (this.played || 0) + 1; }
   pause() {}
   stop() { this.stopped = (this.stopped || 0) + 1; }
+  destroy() { this.destroyed = (this.destroyed || 0) + 1; }
   seek() {}
 }
 
@@ -280,6 +281,7 @@ await group('miniprogram/app', async () => {
     app.playAt.call(app, 2);
     assert.ok(audioInstance.src.includes('/api/audio/3'), `src=${audioInstance.src}`);
     assert.equal(app.globalData.index, 2);
+    assert.ok(audioInstance.destroyed >= 1, '换源必须销毁重建实例（否则继承上一首的播放秒数）');
   });
 
   await test('混合队列：点 VIP 歌自动落下一个可播首', () => {

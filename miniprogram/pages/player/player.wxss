@@ -91,11 +91,16 @@
 
 .lyrics {
   width: 100%;
-  height: 380rpx;
+  height: 320rpx;
   background: #ffffff;
   border-radius: 24rpx;
-  padding: 24rpx 28rpx;
+  padding: 0 28rpx;
   box-sizing: border-box;
+}
+
+/* 歌词滚动缓冲：上/下各留半屏高，让第一句/最后一句也能滚到高亮可视位置 */
+.lyric-pad {
+  height: 96rpx;
 }
 
 .lyric {
