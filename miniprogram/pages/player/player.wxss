@@ -25,8 +25,8 @@
 
 /* 圆形唱片：旋转时不突兀；暂停用 animation-play-state 停在原角度（不会跳回 0°） */
 .artwork {
-  width: 380rpx;
-  height: 380rpx;
+  width: 540rpx;
+  height: 540rpx;
   border-radius: 50%;
   background: #ececf1;
   box-shadow: 0 20rpx 60rpx rgba(0, 0, 0, 0.16);
@@ -279,16 +279,15 @@
   vertical-align: middle;
 }
 
-/* 歌词：flex 吃掉中部剩余空间（进度条等沉底），内容仍是"滑动窗口"（上下渐隐 + 平滑跟随） */
+/* 歌词紧凑小窗（标准播放器样式）：约 2~3 行，平滑跟随 + 手滑翻看 */
 .lyrics {
   position: relative;
   width: 100%;
-  flex: 1 1 auto;
-  min-height: 380rpx;
+  height: 220rpx;
   background: #ffffff;
-  border-radius: 24rpx;
+  border-radius: 20rpx;
   overflow: hidden;
-  box-shadow: 0 8rpx 30rpx rgba(0, 0, 0, 0.05);
+  box-shadow: 0 6rpx 24rpx rgba(0, 0, 0, 0.04);
 }
 
 .lyric-track {
@@ -337,7 +336,7 @@
   position: absolute;
   left: 0;
   right: 0;
-  height: 70rpx;
+  height: 60rpx;
   pointer-events: none;
 }
 
