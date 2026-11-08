@@ -3,7 +3,7 @@ const { api, parseLyrics, lyricIndexAt } = require('../../utils/api.js');
 // 歌词窗口：固定高度的"一屏"卡片（不是撑满整页），内含 104rpx 引导空白。
 // 手滑可翻看（冻结自动跟随 3 秒后归位），播放时自动滚到高亮行。
 const LYRIC_LINE_RPX = 76;
-const LYRIC_WINDOW_RPX = 340;   // 歌词窗口高度
+const LYRIC_WINDOW_RPX = 380;   // 歌词窗口高度（略放宽一档，底部组沉底后中间仍有余量）
 const LYRIC_LEAD_RPX = 104;     // 窗口内上下引导空白
 
 function lyricMaxOffset(lines) {

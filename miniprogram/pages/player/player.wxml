@@ -41,25 +41,28 @@
       <view class="lyric-fade lyric-fade-bottom"></view>
     </view>
 
-    <slider
-      class="progress"
-      min="0"
-      max="{{duration || 1}}"
-      value="{{current}}"
-      activeColor="#007aff"
-      backgroundColor="rgba(0,0,0,0.08)"
-      block-size="18"
-      bindchanging="onSliderChanging"
-      bindchange="onSeek"
-    />
-    <view class="times"><text>{{currText}}</text><text>{{durText}}</text></view>
+    <!-- 底部控制组：进度条 + 时间 + 控制键，推到屏幕最底边 -->
+    <view class="bottom-block">
+      <slider
+        class="progress"
+        min="0"
+        max="{{duration || 1}}"
+        value="{{current}}"
+        activeColor="#007aff"
+        backgroundColor="rgba(0,0,0,0.08)"
+        block-size="18"
+        bindchanging="onSliderChanging"
+        bindchange="onSeek"
+      />
+      <view class="times"><text>{{currText}}</text><text>{{durText}}</text></view>
 
-    <view class="controls">
-      <view class="ctl-btn small {{playMode === 'shuffle' ? 'ic-shuffle' : 'ic-order'}}" bindtap="onCycleMode"></view>
-      <view class="ctl-btn ic-prev" bindtap="onPrev"></view>
-      <view class="ctl-btn main {{isPlaying ? 'ic-pause' : 'ic-play'}}" bindtap="onToggle"></view>
-      <view class="ctl-btn ic-next" bindtap="onNext"></view>
-      <view class="ctl-btn small ic-queue" bindtap="onOpenQueue"></view>
+      <view class="controls">
+        <view class="ctl-btn small {{playMode === 'shuffle' ? 'ic-shuffle' : 'ic-order'}}" bindtap="onCycleMode"></view>
+        <view class="ctl-btn ic-prev" bindtap="onPrev"></view>
+        <view class="ctl-btn main {{isPlaying ? 'ic-pause' : 'ic-play'}}" bindtap="onToggle"></view>
+        <view class="ctl-btn ic-next" bindtap="onNext"></view>
+        <view class="ctl-btn small ic-queue" bindtap="onOpenQueue"></view>
+      </view>
     </view>
   </block>
 
