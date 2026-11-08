@@ -11,11 +11,43 @@ Page({
     loading: false,
     error: '',
     account: { logged: false, nickname: '', avatar: '' },
+    now: null,       // 迷你播放条数据（当前曲目）
+    nowPlaying: false,
   },
 
   onLoad() {
     this.loadSection(this.data.activeKey);
     this.syncAccount();
+    this.syncNow();
+    // 迷你条跟随全局播放状态：切歌/播放暂停即刻反映
+    const app = getApp();
+    this._subs = [
+      app.subscribe('track', () => this.syncNow()),
+      app.subscribe('status', () => this.syncNow()),
+    ];
+  },
+
+  onUnload() {
+    (this._subs || []).forEach((dispose) => dispose());
+    this._subs = [];
+  },
+
+  /** 同步迷你播放条：有没有歌在播 + 是否 playing。 */
+  syncNow() {
+    const app = getApp();
+    const track = app.current();
+    this.setData({
+      now: track,
+      nowPlaying: app.isPlaying(),
+    });
+  },
+
+  onToggleNow() {
+    getApp().toggle();
+  },
+
+  onOpenPlayer() {
+    wx.navigateTo({ url: '/pages/player/player' });
   },
 
   // 从网页版扫码登录后切回小程序，这里同步一次登录态与账号板块可见性。

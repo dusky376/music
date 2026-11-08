@@ -297,7 +297,7 @@ await group('miniprogram/app', async () => {
     resetApp();
     app.globalData.queue = [
       { id: '1', fee: 1 },
-      { id: '2', fee: 8 },
+      { id: '2', fee: 4 },
     ];
     audioInstance.src = 'keep-me';
     const errors = [];
@@ -309,6 +309,18 @@ await group('miniprogram/app', async () => {
     assert.equal(audioInstance.src, 'keep-me', 'src must not change');
     assert.equal(app.globalData.index, -1);
     assert.equal(app.globalData.status, 'idle');
+  });
+
+  await test('fee 8（免费试听）可播——回归：误判 8 为 VIP 会让扫描绕回第一首', () => {
+    resetApp();
+    app.globalData.queue = [
+      { id: '1', fee: 0 },
+      { id: '2', fee: 8 },
+      { id: '3', fee: 8 },
+    ];
+    app.playAt.call(app, 2);
+    assert.equal(app.globalData.index, 2, 'fee 8 plays in place');
+    assert.ok(audioInstance.src.includes('/api/audio/3'));
   });
 
   await test('playNext/playPrev 双向环绕且跳过 VIP', () => {

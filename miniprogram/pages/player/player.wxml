@@ -21,9 +21,9 @@
     <view class="times"><text>{{currText}}</text><text>{{durText}}</text></view>
 
     <view class="controls">
-      <button class="ctl-btn" bindtap="onPrev" plain>⏮</button>
-      <button class="ctl-btn main" bindtap="onToggle" plain>{{isPlaying ? '⏸' : '▶'}}</button>
-      <button class="ctl-btn" bindtap="onNext" plain>⏭</button>
+      <view class="ctl-btn ic-prev" bindtap="onPrev"></view>
+      <view class="ctl-btn main {{isPlaying ? 'ic-pause' : 'ic-play'}}" bindtap="onToggle"></view>
+      <view class="ctl-btn ic-next" bindtap="onNext"></view>
     </view>
 
     <scroll-view class="lyrics" scroll-y>

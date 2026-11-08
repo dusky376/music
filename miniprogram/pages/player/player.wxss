@@ -47,32 +47,46 @@
 .controls {
   display: flex;
   align-items: center;
-  gap: 40rpx;
+  gap: 56rpx;
 }
 
+/* 控制按钮：不用 <button>（默认样式洗不干净），不用 emoji（手机端渲染成彩色表情）。
+   图标统一用内嵌 SVG data-uri，跨设备渲染一致。 */
 .ctl-btn {
-  border: none;
-  background: rgba(0, 0, 0, 0.05);
-  border-radius: 50%;
   width: 96rpx;
   height: 96rpx;
-  font-size: 34rpx;
-  line-height: 96rpx;
-  padding: 0;
-  color: #1d1d1f;
+  border-radius: 50%;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 52rpx 52rpx;
 }
 
-.ctl-btn::after {
-  border: none;
+.ctl-btn:active {
+  opacity: 0.6;
+}
+
+.ic-prev {
+  background-image: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZD0iTTYgNmgydjEySDZ6bTMuNSA2bDguNSA2VjZ6IiBmaWxsPSIjM2EzYTQwIi8+PC9zdmc+');
+}
+
+.ic-next {
+  background-image: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZD0iTTE2IDZoMnYxMmgtMnpNNiAxOGw4LjUtNkw2IDZ6IiBmaWxsPSIjM2EzYTQwIi8+PC9zdmc+');
 }
 
 .ctl-btn.main {
-  width: 140rpx;
-  height: 140rpx;
-  line-height: 140rpx;
-  font-size: 48rpx;
-  background: #1d1d1f;
-  color: #fff;
+  width: 144rpx;
+  height: 144rpx;
+  background-color: #1d1d1f;
+  background-size: 60rpx 60rpx;
+  box-shadow: 0 16rpx 40rpx rgba(0, 0, 0, 0.24);
+}
+
+.ic-play {
+  background-image: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZD0iTTggNXYxNGwxMS03eiIgZmlsbD0iI2ZmZmZmZiIvPjwvc3ZnPg==');
+}
+
+.ic-pause {
+  background-image: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZD0iTTYgMTloNFY1SDZ6bTgtMTR2MTRoNFY1eiIgZmlsbD0iI2ZmZmZmZiIvPjwvc3ZnPg==');
 }
 
 .lyrics {

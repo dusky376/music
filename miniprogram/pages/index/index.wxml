@@ -47,4 +47,17 @@
       <view class="dur">{{item.durText}}</view>
     </view>
   </view>
+
+  <!-- 迷你播放条：有当前曲目时贴底常驻（列出封面/歌名 + 播放暂停 + 点击进播放页） -->
+  <view wx:if="{{now}}" class="now-bar" bindtap="onOpenPlayer">
+    <image class="now-cover" src="{{now.cover}}" mode="aspectFill" />
+    <view class="now-meta">
+      <view class="now-name">{{now.name}}</view>
+      <view class="now-artist">{{now.artist}}</view>
+    </view>
+    <view
+      class="now-toggle {{nowPlaying ? 'ic-pause' : 'ic-play'}}"
+      catchtap="onToggleNow"
+    ></view>
+  </view>
 </view>

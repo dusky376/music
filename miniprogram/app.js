@@ -85,7 +85,9 @@ App({
     for (let step = 0; step < len; step += 1) {
       const base = (((start % len) + len) % len + (backward ? len - step : step)) % len;
       const fee = Number(queue[base].fee) || 0;
-      if (fee !== 1 && fee !== 4 && fee !== 8) return base;
+      // 与服务端 /api/track/:id/url 的门禁对齐：只有 fee 1（VIP）和 4（专辑付费）拦，
+      // fee 8 是"非会员免费试听"，可播——之前误把 8 也拦掉，会让扫描绕回唯一免费首。
+      if (fee !== 1 && fee !== 4) return base;
     }
     return -1;
   },

@@ -51,6 +51,9 @@ const ACCOUNT_SECTIONS = [
   { key: 'likes', title: '我喜欢的歌曲', account: true },
 ];
 
+/** 歌曲元数据行（LRC 开头的制作信息），不进歌词滚动区——与网页版 src/core/lyrics.js 对齐。 */
+const CREDIT = /^(作词|作曲|编曲|制作人|出品|监制|混音|母带|录音|和声|吉他|贝斯|鼓|键盘|弦乐|发行|词|曲|翻译|OP|ED)\s*[:：]/;
+
 /** 把 LRC 文本解析为 [{ t, text }]，按时间升序。 */
 function parseLyrics(raw) {
   return String(raw || '')
@@ -58,12 +61,13 @@ function parseLyrics(raw) {
     .map((line) => {
       const m = line.match(/\[(\d{1,2}):(\d{1,2})(?:\.(\d{1,3}))?\](.*)$/);
       if (!m) return null;
+      // 百分秒(.50)按网页版语义补齐三位毫秒：'50' → '500' → 0.5s，不是 0.05s
       return {
-        t: Number(m[1]) * 60 + Number(m[2]) + Number(m[3] || 0) / 1000,
+        t: Number(m[1]) * 60 + Number(m[2]) + Number((m[3] || '0').padEnd(3, '0')) / 1000,
         text: (m[4] || '').trim(),
       };
     })
-    .filter((x) => x && x.text)
+    .filter((x) => x && x.text && !CREDIT.test(x.text))
     .sort((a, b) => a.t - b.t);
 }
 
