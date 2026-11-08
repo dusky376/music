@@ -2,6 +2,7 @@
   <block wx:if="{{track}}">
     <view class="artwork-box">
       <image class="artwork {{isPlaying ? 'spin' : ''}}" src="{{track.cover}}" mode="aspectFill" />
+      <view wx:if="{{!audioLoading}}" class="disc-hole"></view>
       <!-- 音频尚未就绪：给"点了没反应"一个即时反馈 -->
       <view wx:if="{{audioLoading}}" class="audio-loading"><view class="spinner"></view></view>
     </view>

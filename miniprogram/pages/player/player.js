@@ -1,8 +1,9 @@
 const { api, parseLyrics, lyricIndexAt } = require('../../utils/api.js');
 
-// 歌词平滑滚动的排版常量：单行高 76rpx；高亮行锚定在窗口垂直居中（容器 300rpx）
+// 歌词平滑滚动：单行高 76rpx；高亮行冻结在距歌词区顶部约 200rpx 的固定位置
+// （104 引导空白 - 200 目标位 = 96），与容器实际高度无关，flex 拉伸也不漂移。
 const LYRIC_LINE_RPX = 76;
-const LYRIC_ANCHOR_RPX = 8; // 引导空白 104 - (300-76)/2 = 8
+const LYRIC_ANCHOR_RPX = 96;
 
 const ERROR_TEXT = {
   login_required: 'VIP/付费歌曲，登录后才能播放',
