@@ -1,5 +1,5 @@
 .wrap {
-  padding: 40rpx 32rpx 60rpx;
+  padding: 32rpx 32rpx 48rpx;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -25,8 +25,8 @@
 
 /* 圆形唱片：旋转时不突兀；暂停用 animation-play-state 停在原角度（不会跳回 0°） */
 .artwork {
-  width: 460rpx;
-  height: 460rpx;
+  width: 400rpx;
+  height: 400rpx;
   border-radius: 50%;
   background: #ececf1;
   box-shadow: 0 20rpx 60rpx rgba(0, 0, 0, 0.16);
@@ -47,10 +47,10 @@
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 56rpx;
-  height: 56rpx;
-  margin-left: -28rpx;
-  margin-top: -28rpx;
+  width: 48rpx;
+  height: 48rpx;
+  margin-left: -24rpx;
+  margin-top: -24rpx;
   border-radius: 50%;
   background: #f7f7f9;
   box-shadow: 0 4rpx 14rpx rgba(0, 0, 0, 0.25), 0 0 0 6rpx rgba(255, 255, 255, 0.22);
