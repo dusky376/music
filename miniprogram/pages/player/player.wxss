@@ -4,8 +4,6 @@
   flex-direction: column;
   align-items: center;
   gap: 26rpx;
-  min-height: 100vh; /* 整页撑满视口：歌词区吃中间剩余空间，进度条/时间/控制键沉到底部 */
-  box-sizing: border-box;
 }
 
 .artwork-box {
@@ -269,18 +267,24 @@
   vertical-align: middle;
 }
 
-/* 歌词：吃掉中间全部剩余空间（进度条等沉底），内容 translateY 平滑滚动 */
+/* 歌词：固定高度"一屏"卡片，播放时自动滚到高亮行，手滑可翻看（3s 后归位） */
 .lyrics {
   position: relative;
   width: 100%;
-  flex: 1 1 auto;
-  min-height: 420rpx;
+  height: 340rpx;
+  background: #ffffff;
+  border-radius: 24rpx;
   overflow: hidden;
+  box-shadow: 0 8rpx 30rpx rgba(0, 0, 0, 0.05);
 }
 
 .lyric-track {
   transition: transform 340ms cubic-bezier(0.22, 0.61, 0.36, 1);
   will-change: transform;
+}
+
+.lyric-track.dragging {
+  transition: none; /* 手滑跟手，不插动画 */
 }
 
 .lyric-lead {
@@ -326,10 +330,10 @@
 
 .lyric-fade-top {
   top: 0;
-  background: linear-gradient(to bottom, #f7f7f9 20%, rgba(247, 247, 249, 0));
+  background: linear-gradient(to bottom, #ffffff 12%, rgba(255, 255, 255, 0));
 }
 
 .lyric-fade-bottom {
   bottom: 0;
-  background: linear-gradient(to top, #f7f7f9 20%, rgba(247, 247, 249, 0));
+  background: linear-gradient(to top, #ffffff 12%, rgba(255, 255, 255, 0));
 }

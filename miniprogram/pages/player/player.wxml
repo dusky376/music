@@ -12,12 +12,18 @@
       <text class="artist">{{track.artist}}</text>
     </view>
 
-    <!-- 歌词在进度条上方：非高亮行静置，高亮行放大提亮；translateY 平滑滚动跟随；点行即跳播 -->
-    <view class="lyrics">
+    <!-- 歌词固定高度卡片：手动可滑（冻结自动跟随 3s 后归位），播放时平滑滚到高亮行；点行即跳播 -->
+    <view
+      class="lyrics"
+      bindtouchstart="onLyricTouchStart"
+      catchtouchmove="onLyricTouchMove"
+      bindtouchend="onLyricTouchEnd"
+      bindtouchcancel="onLyricTouchEnd"
+    >
       <view wx:if="{{lyricError}}" class="lyric-empty">{{lyricError}}</view>
       <view
         wx:else
-        class="lyric-track"
+        class="lyric-track {{lyricDragging ? 'dragging' : ''}}"
         style="transform: translateY(-{{lyricOffset}}rpx)"
       >
         <view class="lyric-lead"></view>
@@ -26,6 +32,7 @@
           wx:key="time"
           class="lyric {{index === lyricActive ? 'lyric-active' : ''}}"
           data-t="{{item.t}}"
+          data-index="{{index}}"
           bindtap="onSeekToLyric"
         >{{item.text}}</view>
         <view class="lyric-lead"></view>
