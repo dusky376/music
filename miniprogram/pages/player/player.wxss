@@ -279,11 +279,12 @@
   vertical-align: middle;
 }
 
-/* 歌词：固定高度"一屏"卡片，播放时自动滚到高亮行，手滑可翻看（3s 后归位） */
+/* 歌词：flex 吃掉中部剩余空间（进度条等沉底），内容仍是"滑动窗口"（上下渐隐 + 平滑跟随） */
 .lyrics {
   position: relative;
   width: 100%;
-  height: 380rpx;
+  flex: 1 1 auto;
+  min-height: 380rpx;
   background: #ffffff;
   border-radius: 24rpx;
   overflow: hidden;
