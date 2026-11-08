@@ -4,7 +4,10 @@
   flex-direction: column;
   align-items: center;
   gap: 26rpx;
-  min-height: 100vh; /* 底部控制组用 margin-top:auto 推到最底边 */
+  /* 必须是 height（确定高度），不能是 min-height：
+     flex 子项的收/放都以容器确定高度为基础；min-height 下容器会随
+     歌词列表的原始高度增长，整页被撑爆导致滚动（每次"歌词变墙"的根因） */
+  height: 100vh;
   box-sizing: border-box;
 }
 
