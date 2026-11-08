@@ -26,7 +26,7 @@
         class="lyric-track {{lyricDragging ? 'dragging' : ''}}"
         style="transform: translateY(-{{lyricOffset}}rpx)"
       >
-        <view class="lyric-lead"></view>
+        <view class="lyric-lead" style="height: {{lyricLead}}rpx"></view>
         <view
           wx:for="{{lyricLines}}"
           wx:key="time"
@@ -35,7 +35,7 @@
           data-index="{{index}}"
           bindtap="onSeekToLyric"
         >{{item.text}}</view>
-        <view class="lyric-lead"></view>
+        <view class="lyric-lead" style="height: {{lyricLead}}rpx"></view>
       </view>
       <view class="lyric-fade lyric-fade-top"></view>
       <view class="lyric-fade lyric-fade-bottom"></view>

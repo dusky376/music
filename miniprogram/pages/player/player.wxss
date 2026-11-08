@@ -303,7 +303,8 @@
 }
 
 .lyric-lead {
-  height: 64rpx; /* 滚动缓冲：与 JS 里的 LYRIC_LEAD_RPX 常量保持一致（改一处必改另一处） */
+  /* 高度由 JS 按实测窗高动态下发（style 内联），保证任意行可居中 */
+  flex: 0 0 auto;
 }
 
 .lyric {

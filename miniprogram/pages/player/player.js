@@ -2,19 +2,24 @@ const { api, parseLyrics, lyricIndexAt } = require('../../utils/api.js');
 
 // 歌词窗口：flex 吃掉封面与进度条间的全部高度（多出来的面积=多显示几行）。
 // 高度随屏而变 → 运行时 SelectorQuery 实测（rpx），未量到按 320 兜底。
+// 上下 lead 垫 = (窗口高 - 行高) / 2，动态生成 —— 任意行（含首尾行）都能滚到正中。
 const LYRIC_LINE_RPX = 84;
 const LYRIC_WINDOW_FALLBACK_RPX = 320;
-const LYRIC_LEAD_RPX = 64;      // 与 .lyric-lead 的 64rpx 保持一致（改一处必改另一处）
+const LYRIC_LEAD_MIN_RPX = 56;
 
-function lyricMaxOffset(winRpx, lines) {
-  return Math.max(0, LYRIC_LEAD_RPX + lines * LYRIC_LINE_RPX - winRpx);
+function lyricLeadRpx(winRpx) {
+  return Math.max(LYRIC_LEAD_MIN_RPX, Math.round((winRpx - LYRIC_LINE_RPX) / 2));
 }
 
-/** 高亮第 idx 行时窗口位移：该行顶端停在窗口垂直中心，并夹在可滚范围内。 */
-function lyricOffsetFor(winRpx, lines, idx) {
+function lyricMaxOffset(lines) {
+  // lead 上 + lead 下 ≈ 窗高 - 行高：滚到最后一句时它正好居中，之后无余量
+  return Math.max(0, (lines - 1) * LYRIC_LINE_RPX);
+}
+
+/** 高亮第 idx 行时窗口位移：该行正好停在窗口垂直中心（动态 lead 下即 idx * 行高）。 */
+function lyricOffsetFor(lines, idx) {
   if (idx <= 0) return 0;
-  const desired = LYRIC_LEAD_RPX + idx * LYRIC_LINE_RPX - (winRpx - LYRIC_LINE_RPX) / 2;
-  return Math.min(Math.max(0, desired), lyricMaxOffset(winRpx, lines));
+  return Math.min(idx * LYRIC_LINE_RPX, lyricMaxOffset(lines));
 }
 
 const ERROR_TEXT = {
@@ -39,6 +44,7 @@ Page({
     lyricActive: -1,
     lyricError: '',
     lyricOffset: 0,    // 歌词窗口位移（rpx），transform 平滑动画用
+    lyricLead: 56,     // 上下空白垫（rpx）：实测窗高后重算，保证任意行可居中
     lyricDragging: false,
     playMode: 'order',
     queueOpen: false,
@@ -111,10 +117,11 @@ Page({
       .boundingClientRect((rect) => {
         if (rect && rect.height > 0) {
           this._lyricHeightRpx = (rect.height * 750) / (this._winWidth || 375);
-          // 已有高亮行时按实测高度重新定位一次
+          // lead = (窗高 - 行高)/2：任意行都能被送到窗口正中
+          this.setData({ lyricLead: lyricLeadRpx(this.lyricWindowRpx()) });
           if (this.data.lyricActive >= 0) {
             this.setData({
-              lyricOffset: lyricOffsetFor(this.lyricWindowRpx(), this.data.lyricLines.length, this.data.lyricActive),
+              lyricOffset: lyricOffsetFor(this.data.lyricLines.length, this.data.lyricActive),
             });
           }
         }
@@ -152,7 +159,7 @@ Page({
     if (!freeze) {
       if (activeIdx !== this.data.lyricActive) {
         patch.lyricActive = activeIdx;
-        patch.lyricOffset = lyricOffsetFor(this.lyricWindowRpx(), this.data.lyricLines.length, activeIdx);
+        patch.lyricOffset = lyricOffsetFor(this.data.lyricLines.length, activeIdx);
       }
     }
     this.setData(patch);
@@ -208,7 +215,7 @@ Page({
     this.setData({
       current: e.detail.value,
       lyricActive: idx,
-      lyricOffset: lyricOffsetFor(this.lyricWindowRpx(), this.data.lyricLines.length, idx),
+      lyricOffset: lyricOffsetFor(this.data.lyricLines.length, idx),
     });
     app.seek(e.detail.value);
   },
@@ -254,7 +261,7 @@ Page({
     if (Number.isInteger(index) && index >= 0 && index < lines) {
       this.setData({
         lyricActive: index,
-        lyricOffset: lyricOffsetFor(this.lyricWindowRpx(), lines, index),
+        lyricOffset: lyricOffsetFor(lines, index),
       });
     }
     this.scrubbing = true; // 复用"拖动中"锁：seek 期间 time 事件不回跳旧位置
@@ -277,7 +284,7 @@ Page({
     // clientY 是逻辑像素，位移换算成 rpx（设计稿宽 750）
     const scale = 750 / (this._winWidth || 375);
     const deltaRpx = (this._lyricTouch.startY - e.touches[0].clientY) * scale;
-    const max = lyricMaxOffset(this.lyricWindowRpx(), this.data.lyricLines.length);
+    const max = lyricMaxOffset(this.data.lyricLines.length);
     const next = Math.min(Math.max(0, this._lyricTouch.base + deltaRpx), max);
     this._lyricFreezeUntil = Date.now() + 4000; // 持续滑动期间持续冻结
     this.setData({ lyricOffset: next });
