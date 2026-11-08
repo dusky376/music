@@ -14,6 +14,28 @@ App({
 
   audio: null,
   failStreak: 0,
+  playMode: 'order', // order 顺序 | shuffle 随机
+
+  onLaunch() {
+    // 播放模式持久化：下次打开沿用
+    try {
+      this.playMode = wx.getStorageSync('playMode') || 'order';
+    } catch (error) {
+      // 存储不可用时保持默认顺序
+    }
+    this.audio = this._createAudio();
+  },
+
+  /** 切换顺序/随机并落地持久化，返回新模式。 */
+  cycleMode() {
+    this.playMode = this.playMode === 'order' ? 'shuffle' : 'order';
+    try {
+      wx.setStorageSync('playMode', this.playMode);
+    } catch (error) {
+      // 存储失败只影响下次记忆，本次模式照常用
+    }
+    return this.playMode;
+  },
 
   _createAudio() {
     const audio = wx.createInnerAudioContext({ useWebAudioImplement: false });
@@ -164,6 +186,17 @@ App({
   playNext(auto) {
     const { index, queue } = this.globalData;
     if (!queue.length) return;
+    // 随机模式：从可播集合（排除当前首）里随机挑
+    if (this.playMode === 'shuffle' && queue.length > 1) {
+      const candidates = [];
+      for (let i = 0; i < queue.length; i += 1) {
+        const fee = Number(queue[i].fee) || 0;
+        if (i !== index && fee !== 1 && fee !== 4) candidates.push(i);
+      }
+      if (!candidates.length) return; // 没有别的可播，保持当前曲
+      this._start(candidates[Math.floor(Math.random() * candidates.length)], false);
+      return;
+    }
     this._start((index + 1) % queue.length, false);
     // auto=true 表示自然播完切下一首（auto 分支保留给后续策略）。
     void auto;

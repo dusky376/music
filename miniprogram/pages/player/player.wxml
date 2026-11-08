@@ -1,28 +1,37 @@
 <view class="wrap">
   <block wx:if="{{track}}">
-    <image class="artwork {{isPlaying ? 'spin' : ''}}" src="{{track.cover}}" mode="aspectFill" />
+    <view class="artwork-box">
+      <image class="artwork {{isPlaying ? 'spin' : ''}}" src="{{track.cover}}" mode="aspectFill" />
+      <!-- 音频尚未就绪：给"点了没反应"一个即时反馈 -->
+      <view wx:if="{{audioLoading}}" class="audio-loading"><view class="spinner"></view></view>
+    </view>
 
     <view class="meta">
       <text class="name">{{track.name}}</text>
       <text class="artist">{{track.artist}}</text>
     </view>
 
-    <!-- 歌词在进度条上方；高亮行通过 scroll-into-view 自动滚动跟随 -->
-    <scroll-view
-      class="lyrics"
-      scroll-y
-      scroll-into-view="{{lyricInto}}"
-      scroll-with-animation
-    >
-      <view class="lyric-pad"></view>
+    <!-- 歌词在进度条上方：非高亮行静置，高亮行放大提亮；translateY 平滑滚动跟随；点行即跳播 -->
+    <view class="lyrics">
+      <view wx:if="{{lyricError}}" class="lyric-empty">{{lyricError}}</view>
       <view
-        wx:for="{{lyricLines}}"
-        wx:key="time"
-        id="lyr-{{index}}"
-        class="lyric {{index === lyricActive ? 'lyric-active' : ''}}"
-      >{{item.text}}</view>
-      <view class="lyric-pad"></view>
-    </scroll-view>
+        wx:else
+        class="lyric-track"
+        style="transform: translateY(-{{lyricOffset}}rpx)"
+      >
+        <view class="lyric-lead"></view>
+        <view
+          wx:for="{{lyricLines}}"
+          wx:key="time"
+          class="lyric {{index === lyricActive ? 'lyric-active' : ''}}"
+          data-t="{{item.t}}"
+          bindtap="onSeekToLyric"
+        >{{item.text}}</view>
+        <view class="lyric-lead"></view>
+      </view>
+      <view class="lyric-fade lyric-fade-top"></view>
+      <view class="lyric-fade lyric-fade-bottom"></view>
+    </view>
 
     <slider
       class="progress"
@@ -38,11 +47,38 @@
     <view class="times"><text>{{currText}}</text><text>{{durText}}</text></view>
 
     <view class="controls">
+      <view class="ctl-btn small {{playMode === 'shuffle' ? 'ic-shuffle' : 'ic-order'}}" bindtap="onCycleMode"></view>
       <view class="ctl-btn ic-prev" bindtap="onPrev"></view>
       <view class="ctl-btn main {{isPlaying ? 'ic-pause' : 'ic-play'}}" bindtap="onToggle"></view>
       <view class="ctl-btn ic-next" bindtap="onNext"></view>
+      <view class="ctl-btn small ic-queue" bindtap="onOpenQueue"></view>
     </view>
   </block>
 
   <view wx:else class="empty">从首页选一首歌开始播放</view>
+
+  <!-- 播放队列面板：点任意一首直接切过去 -->
+  <view wx:if="{{queueOpen}}" class="sheet-mask" bindtap="onCloseQueue">
+    <view class="sheet" catchtap="noop">
+      <view class="sheet-head">
+        <text class="sheet-title">播放队列（{{queueList.length}}）</text>
+        <view class="sheet-close" catchtap="onCloseQueue">完成</view>
+      </view>
+      <scroll-view scroll-y class="sheet-scroll">
+        <view
+          wx:for="{{queueList}}"
+          wx:key="id"
+          class="sheet-row {{index === queueIndex ? 'sheet-row-active' : ''}}"
+          data-index="{{index}}"
+          bindtap="onPlayQueueRow"
+        >
+          <text wx:if="{{index === queueIndex}}" class="sheet-playing">♪</text>
+          <view class="sheet-meta">
+            <view class="sheet-name">{{item.name}}<text wx:if="{{item.vip}}" class="badge">VIP</text></view>
+            <view class="sheet-artist">{{item.artist}}</view>
+          </view>
+        </view>
+      </scroll-view>
+    </view>
+  </view>
 </view>

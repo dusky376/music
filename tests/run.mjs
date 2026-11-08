@@ -233,7 +233,11 @@ class FakeAudio {
 
 const audioInstance = new FakeAudio();
 const app = {}; // App(options) 写入
-global.wx = { createInnerAudioContext: () => audioInstance };
+global.wx = {
+  createInnerAudioContext: () => audioInstance,
+  getStorageSync: () => '', // 播放模式持久化读取桩
+  setStorageSync: () => {},
+};
 global.getCurrentPages = () => [];
 global.App = (options) => Object.assign(app, options);
 requireCjs('../miniprogram/app.js');
@@ -360,6 +364,15 @@ await group('miniprogram/app', async () => {
     assert.equal(errors[errors.length - 1].reason, 'consecutive_failed');
     assert.equal(app.globalData.status, 'idle', 'stopped after streak');
     assert.ok(audioInstance.stopped >= 1, 'audio.stop() called');
+  });
+
+  await test('playMode：cycleMode 在顺序/随机间切换', () => {
+    resetApp();
+    app.onLaunch.call(app); // 读存储桩（返回空 → 默认 order）
+    const before = app.playMode;
+    const after = app.cycleMode.call(app);
+    assert.notEqual(before, after, '切换必须翻转');
+    assert.equal(app.cycleMode.call(app), before, '再切回原模式');
   });
 
   await test('onPlay 成功清零 failStreak（失败链可恢复）', () => {

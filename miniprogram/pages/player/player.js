@@ -1,5 +1,9 @@
 const { api, parseLyrics, lyricIndexAt } = require('../../utils/api.js');
 
+// 歌词平滑滚动的排版常量：单行高 76rpx；高亮行锚定在窗口垂直居中（容器 300rpx）
+const LYRIC_LINE_RPX = 76;
+const LYRIC_ANCHOR_RPX = 8; // 引导空白 104 - (300-76)/2 = 8
+
 const ERROR_TEXT = {
   login_required: 'VIP/付费歌曲，登录后才能播放',
   vip_required: '当前账号只能试听',
@@ -21,7 +25,12 @@ Page({
     lyricLines: [],
     lyricActive: -1,
     lyricError: '',
-    lyricInto: '',
+    lyricOffset: 0,  // 歌词滚动位移（rpx），transform 平滑动画用
+    playMode: 'order',
+    queueOpen: false,
+    queueList: [],
+    queueIndex: -1,
+    audioLoading: false,
   },
 
   onLoad() {
@@ -34,7 +43,10 @@ Page({
       app.subscribe('status', (d) => this.handleAudioStatus(d)),
       app.subscribe('track', (d) => this.handleAudioTrack(d)),
       app.subscribe('error', (d) => this.handleAudioError(d)),
+      // 音频可播放/已起播：摘掉加载指示
+      app.subscribe('canplay', () => this.setData({ audioLoading: false })),
     ];
+    this.setData({ playMode: app.playMode || 'order' });
 
     const track = app.current();
     if (!track) {
@@ -66,14 +78,17 @@ Page({
     this._subs = [];
   },
 
-  handleAudioTrack({ track }) {
+  handleAudioTrack({ track, index }) {
     this.scrubbing = false;
-    this.setData({ track, lyricLines: [], lyricActive: -1, lyricError: '', lyricInto: '' });
+    const patch = { track, lyricLines: [], lyricActive: -1, lyricError: '', lyricOffset: 0, audioLoading: true };
+    if (typeof index === 'number') patch.queueIndex = index;
+    this.setData(patch);
     this.loadLyric(track);
   },
 
   handleAudioStatus({ status }) {
     this.setData({ isPlaying: status === 'playing' });
+    if (status === 'playing') this.setData({ audioLoading: false });
   },
 
   handleAudioTime({ current, duration }) {
@@ -88,9 +103,9 @@ Page({
       durText: app.fmt(duration),
     };
     if (activeIdx !== this.data.lyricActive) {
-      // 高亮行变化：推 scroll-into-view 让歌词自动滚到当前句
+      // 高亮行变化：按累计行高平移歌词（CSS transition 平滑滚动，逐行不是跳变）
       patch.lyricActive = activeIdx;
-      patch.lyricInto = `lyr-${activeIdx}`;
+      patch.lyricOffset = Math.max(0, activeIdx * LYRIC_LINE_RPX - LYRIC_ANCHOR_RPX);
     }
     this.setData(patch);
   },
@@ -141,7 +156,12 @@ Page({
     const app = getApp();
     this.scrubbing = false;
     // 松手位置比拖动过程更准，直接以此为准。
-    this.setData({ current: e.detail.value });
+    const idx = lyricIndexAt(this.data.lyricLines, e.detail.value);
+    this.setData({
+      current: e.detail.value,
+      lyricActive: idx,
+      lyricOffset: Math.max(0, idx * LYRIC_LINE_RPX - LYRIC_ANCHOR_RPX),
+    });
     app.seek(e.detail.value);
   },
 
@@ -150,4 +170,41 @@ Page({
     this.scrubbing = true;
     this.setData({ current: e.detail.value });
   },
+
+  // —— 播放模式（顺序/随机） ——
+  onCycleMode() {
+    const mode = getApp().cycleMode();
+    this.setData({ playMode: mode });
+    wx.showToast({ title: mode === 'shuffle' ? '随机播放' : '顺序播放', icon: 'none', duration: 900 });
+  },
+
+  // —— 队列选歌 ——
+  onOpenQueue() {
+    const app = getApp();
+    this.setData({
+      queueOpen: true,
+      queueList: app.globalData.queue,
+      queueIndex: app.globalData.index,
+    });
+  },
+
+  onCloseQueue() {
+    this.setData({ queueOpen: false });
+  },
+
+  onPlayQueueRow(e) {
+    const index = Number(e.currentTarget.dataset.index);
+    this.setData({ queueOpen: false });
+    getApp().playAt(index);
+  },
+
+  // 点歌词任意行跳到那句（后台 seek，进度/歌词由 time 事件接管）
+  onSeekToLyric(e) {
+    const app = getApp();
+    this.scrubbing = true; // 复用"拖动中"锁：seek 期间 time 事件不回跳旧位置
+    app.seek(Number(e.currentTarget.dataset.t) || 0);
+    setTimeout(() => { this.scrubbing = false; }, 400);
+  },
+
+  noop() {},
 });
