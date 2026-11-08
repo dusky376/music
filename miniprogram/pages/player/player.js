@@ -1,20 +1,20 @@
 const { api, parseLyrics, lyricIndexAt } = require('../../utils/api.js');
 
-// 歌词紧凑小窗：约 2~3 行高度（标准播放器样式），播放时平滑滚到高亮行，
-// 手滑可翻看（3s 后归位），点行跳播。高度固定，锚定按常量计算。
+// 歌词窗口：白卡 flex 吃掉封面与进度条间剩余高度，内容仍是平滑滚动的窗口。
+// 高度随屏幕而变 → 运行时 SelectorQuery 实测（rpx），未量到按 320 兜底。
 const LYRIC_LINE_RPX = 84;
-const LYRIC_WINDOW_RPX = 220;
-const LYRIC_LEAD_RPX = 104;
+const LYRIC_WINDOW_FALLBACK_RPX = 320;
+const LYRIC_LEAD_RPX = 104;     // 窗口内上下引导空白
 
-function lyricMaxOffset(lines) {
-  return Math.max(0, LYRIC_LEAD_RPX + lines * LYRIC_LINE_RPX - LYRIC_WINDOW_RPX);
+function lyricMaxOffset(winRpx, lines) {
+  return Math.max(0, LYRIC_LEAD_RPX + lines * LYRIC_LINE_RPX - winRpx);
 }
 
 /** 高亮第 idx 行时窗口位移：该行顶端停在窗口垂直中心，并夹在可滚范围内。 */
-function lyricOffsetFor(lines, idx) {
+function lyricOffsetFor(winRpx, lines, idx) {
   if (idx <= 0) return 0;
-  const desired = LYRIC_LEAD_RPX + idx * LYRIC_LINE_RPX - (LYRIC_WINDOW_RPX - LYRIC_LINE_RPX) / 2;
-  return Math.min(Math.max(0, desired), lyricMaxOffset(lines));
+  const desired = LYRIC_LEAD_RPX + idx * LYRIC_LINE_RPX - (winRpx - LYRIC_LINE_RPX) / 2;
+  return Math.min(Math.max(0, desired), lyricMaxOffset(winRpx, lines));
 }
 
 const ERROR_TEXT = {
@@ -66,6 +66,8 @@ Page({
       app.subscribe('canplay', () => this.setData({ audioLoading: false })),
     ];
     this.setData({ playMode: app.playMode || 'order' });
+    // 首次进入时可能已有播放曲目：渲染完成后量一次窗口高度
+    setTimeout(() => this._measureLyrics(), 80);
 
     const track = app.current();
     if (!track) {
@@ -97,11 +99,35 @@ Page({
     this._subs = [];
   },
 
+  /** 歌词窗口高度（rpx）：实测优先（flex 拉伸随屏变），失败用常量兜底。 */
+  lyricWindowRpx() {
+    return this._lyricHeightRpx || LYRIC_WINDOW_FALLBACK_RPX;
+  },
+
+  _measureLyrics() {
+    if (!wx.createSelectorQuery) return;
+    wx.createSelectorQuery()
+      .select('.lyrics')
+      .boundingClientRect((rect) => {
+        if (rect && rect.height > 0) {
+          this._lyricHeightRpx = (rect.height * 750) / (this._winWidth || 375);
+          if (this.data.lyricActive >= 0) {
+            this.setData({
+              lyricOffset: lyricOffsetFor(this.lyricWindowRpx(), this.data.lyricLines.length, this.data.lyricActive),
+            });
+          }
+        }
+      })
+      .exec();
+  },
+
   handleAudioTrack({ track, index }) {
     this.scrubbing = false;
     const patch = { track, lyricLines: [], lyricActive: -1, lyricError: '', lyricOffset: 0, audioLoading: true };
     if (typeof index === 'number') patch.queueIndex = index;
     this.setData(patch);
+    // 歌词卡刚渲染（flex 高度随屏变）：稍后实测窗口高度
+    setTimeout(() => this._measureLyrics(), 60);
     this.loadLyric(track);
   },
 
@@ -125,7 +151,7 @@ Page({
     if (!freeze) {
       if (activeIdx !== this.data.lyricActive) {
         patch.lyricActive = activeIdx;
-        patch.lyricOffset = lyricOffsetFor(this.data.lyricLines.length, activeIdx);
+        patch.lyricOffset = lyricOffsetFor(this.lyricWindowRpx(), this.data.lyricLines.length, activeIdx);
       }
     }
     this.setData(patch);
@@ -181,7 +207,7 @@ Page({
     this.setData({
       current: e.detail.value,
       lyricActive: idx,
-      lyricOffset: lyricOffsetFor(this.data.lyricLines.length, idx),
+      lyricOffset: lyricOffsetFor(this.lyricWindowRpx(), this.data.lyricLines.length, idx),
     });
     app.seek(e.detail.value);
   },
@@ -227,7 +253,7 @@ Page({
     if (Number.isInteger(index) && index >= 0 && index < lines) {
       this.setData({
         lyricActive: index,
-        lyricOffset: lyricOffsetFor(lines, index),
+        lyricOffset: lyricOffsetFor(this.lyricWindowRpx(), lines, index),
       });
     }
     this.scrubbing = true; // 复用"拖动中"锁：seek 期间 time 事件不回跳旧位置
@@ -250,7 +276,7 @@ Page({
     // clientY 是逻辑像素，位移换算成 rpx（设计稿宽 750）
     const scale = 750 / (this._winWidth || 375);
     const deltaRpx = (this._lyricTouch.startY - e.touches[0].clientY) * scale;
-    const max = lyricMaxOffset(this.data.lyricLines.length);
+    const max = lyricMaxOffset(this.lyricWindowRpx(), this.data.lyricLines.length);
     const next = Math.min(Math.max(0, this._lyricTouch.base + deltaRpx), max);
     this._lyricFreezeUntil = Date.now() + 4000; // 持续滑动期间持续冻结
     this.setData({ lyricOffset: next });
