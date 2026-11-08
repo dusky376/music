@@ -21,6 +21,7 @@
 .artwork-box {
   position: relative;
   flex: 0 0 auto;
+  margin-top: auto; /* 与 bottom-block 的 margin-top:auto 各分一半剩余空间：头部不顶死、底栏贴底 */
 }
 
 /* 圆形唱片：旋转时不突兀；暂停用 animation-play-state 停在原角度（不会跳回 0°） */
@@ -283,8 +284,7 @@
 .lyrics {
   position: relative;
   width: 100%;
-  flex: 1 1 auto;
-  min-height: 280rpx;
+  height: 280rpx; /* 固定：220 + 封面缩小的 60rpx，等量转移，不再弹性伸缩 */
   background: #ffffff;
   border-radius: 20rpx;
   overflow: hidden;
@@ -301,7 +301,7 @@
 }
 
 .lyric-lead {
-  height: 104rpx; /* 滚动缓冲：让第一句/最后一句也能停在高亮可视位 */
+  height: 64rpx; /* 滚动缓冲：与 JS 里的 LYRIC_LEAD_RPX 常量保持一致（改一处必改另一处） */
 }
 
 .lyric {
