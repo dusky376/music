@@ -304,11 +304,11 @@
 }
 
 .lyric {
-  height: 76rpx;
-  line-height: 76rpx;
+  height: 84rpx;
+  line-height: 84rpx;
   text-align: center;
-  color: rgba(29, 29, 31, 0.32);
-  font-size: 28rpx;
+  color: rgba(29, 29, 31, 0.34);
+  font-size: 30rpx;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -320,7 +320,7 @@
 .lyric-active {
   color: #1d1d1f;
   font-weight: 720;
-  font-size: 34rpx;
+  font-size: 38rpx;
 }
 
 .lyric-empty {
