@@ -3,41 +3,106 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pipeline } from 'node:stream/promises';
-import { CACHE_TTL, COOKIE, LEVELS, SECTIONS, UPSTREAM } from './config.js';
+import {
+  CACHE_TTL,
+  COOKIE,
+  COOKIE_IN_QUERY,
+  LEVELS,
+  SECTIONS,
+  UPSTREAM,
+} from './config.js';
 import { del, delPrefix, stats, wrap } from './cache.js';
+import {
+  GuardError,
+  SECURITY_HEADERS,
+  assertSafeAudioUrl,
+  fetchGuardedAudio,
+} from './security.js';
 
 const UA = 'PureTone/1.0 (+local personal player)';
 const UPSTREAM_TIMEOUT = 9000;
+const AUDIO_HEADER_TIMEOUT = 12000;
 
-const COOKIE_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '.login-cookie');
+const SERVER_DIR = path.dirname(fileURLToPath(import.meta.url));
+// 测试/多实例可用 PURETONE_STATE_DIR 把凭据隔离到临时目录，避免误删真实登录态。
+const STATE_DIR = process.env.PURETONE_STATE_DIR
+  ? path.resolve(process.env.PURETONE_STATE_DIR)
+  : SERVER_DIR;
+const COOKIE_FILE = path.join(STATE_DIR, '.login-cookie');
+// 退出登录后留下的标记：防止 NETEASE_COOKIE 环境变量或旧文件让登录态在重启后「复活」。
+const LOGOUT_SENTINEL = path.join(STATE_DIR, '.logged-out');
 
 // —— 运行时登录态 ——
-// 优先级：环境变量 > 扫码登录（写到 .login-cookie，仅本机回环，已加入 .gitignore）。
-let runtimeCookie = COOKIE;
-if (!runtimeCookie) {
+// 优先级：环境变量 > 扫码登录写下的 .login-cookie。
+// 若用户主动退出过（sentinel 存在），两者都不再自动恢复，必须重新扫码。
+let explicitlyLoggedOut = false;
+try {
+  explicitlyLoggedOut = fs.existsSync(LOGOUT_SENTINEL);
+} catch {
+  explicitlyLoggedOut = false;
+}
+
+function readCookieFile() {
   try {
-    runtimeCookie = fs.readFileSync(COOKIE_FILE, 'utf8').trim() || COOKIE;
+    return fs.readFileSync(COOKIE_FILE, 'utf8').trim();
   } catch {
-    runtimeCookie = COOKIE;
+    return '';
   }
 }
 
+let runtimeCookie = explicitlyLoggedOut ? '' : COOKIE || readCookieFile();
+let cookieSource = runtimeCookie ? (COOKIE && runtimeCookie === COOKIE ? 'env' : 'qr') : 'none';
+let riskControlHits = 0;
+
+/** 写/删凭据。返回用户可见的告警（磁盘失败不再被静默吞掉）。 */
 function setRuntimeCookie(value) {
-  runtimeCookie = value || '';
+  const warnings = [];
+  runtimeCookie = String(value || '').trim();
+  cookieSource = runtimeCookie ? 'qr' : 'none';
+  explicitlyLoggedOut = !runtimeCookie;
+
   try {
-    if (runtimeCookie) fs.writeFileSync(COOKIE_FILE, runtimeCookie, 'utf8');
-    else fs.rmSync(COOKIE_FILE, { force: true });
+    fs.mkdirSync(STATE_DIR, { recursive: true });
+    if (runtimeCookie) {
+      fs.writeFileSync(COOKIE_FILE, runtimeCookie, { encoding: 'utf8', mode: 0o600 });
+      try {
+        fs.chmodSync(COOKIE_FILE, 0o600);
+      } catch {
+        // Windows 上 chmod 可能不生效，尽力而为。
+      }
+      try {
+        fs.rmSync(LOGOUT_SENTINEL, { force: true });
+      } catch {
+        warnings.push('退出标记清理失败');
+      }
+    } else {
+      try {
+        fs.rmSync(COOKIE_FILE, { force: true });
+      } catch {
+        warnings.push('本机凭据文件删除失败，请手动检查 server/.login-cookie');
+      }
+      try {
+        fs.writeFileSync(LOGOUT_SENTINEL, String(Date.now()), { encoding: 'utf8', mode: 0o600 });
+      } catch {
+        warnings.push('退出状态无法持久化，重启后登录态可能恢复');
+      }
+    }
   } catch {
-    // 磁盘不可用时只保留内存态，重启重新扫码即可。
+    warnings.push('凭据写入失败，本次登录仅在当前进程有效');
   }
-  // 登录态变化会让同一首歌的取流结果不同，音频缓存整体失效；
-  // 账号板块（每日推荐/喜欢的歌）也随登录态变化重取。
+
+  // 登录态变化会让同一首歌的取流结果不同，音频/板块缓存整体失效。
   delPrefix('audio:');
+  delPrefix('direct:');
   delPrefix('section:');
+  return warnings;
 }
 
 export function loginState() {
-  return { logged: Boolean(runtimeCookie), source: COOKIE ? 'env' : runtimeCookie ? 'qr' : 'none' };
+  return {
+    logged: Boolean(runtimeCookie),
+    source: runtimeCookie ? cookieSource : explicitlyLoggedOut ? 'logged_out' : 'none',
+  };
 }
 
 export class ApiError extends Error {
@@ -78,32 +143,38 @@ export function normalizeTrack(song) {
   };
 }
 
-export async function upstream(path, params = {}, options = {}) {
+export async function upstream(apiPath, params = {}, options = {}) {
   // 高峰期上游偶发超时：超时类错误自动重试一次（1s 退避），其余错误不重试。
   try {
-    return await upstreamOnce(path, params, options);
+    return await upstreamOnce(apiPath, params, options);
   } catch (error) {
     if (error?.code !== 'UPSTREAM_TIMEOUT' || options.noRetry) throw error;
     await new Promise((resolve) => setTimeout(resolve, 1000));
-    return upstreamOnce(path, params, { ...options, noRetry: true });
+    return upstreamOnce(apiPath, params, { ...options, noRetry: true });
   }
 }
 
-async function upstreamOnce(path, params, options) {
-  const url = new URL(UPSTREAM + (path.startsWith('/') ? path : '/' + path));
+async function upstreamOnce(apiPath, params, options) {
+  const url = new URL(UPSTREAM + (apiPath.startsWith('/') ? apiPath : '/' + apiPath));
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined && value !== null) url.searchParams.set(key, String(value));
   }
+
+  const headers = { 'user-agent': UA, accept: 'application/json' };
   const cookie = options.cookie ?? runtimeCookie;
-  if (cookie) url.searchParams.set('cookie', cookie);
+  if (cookie) {
+    if (COOKIE_IN_QUERY) {
+      // 兼容开关：老版本上游只认 query。默认关闭，避免凭据落进访问日志。
+      url.searchParams.set('cookie', cookie);
+    } else {
+      headers.cookie = cookie;
+    }
+  }
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeout || UPSTREAM_TIMEOUT);
   try {
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: { 'user-agent': UA, accept: 'application/json' },
-    });
+    const res = await fetch(url, { signal: controller.signal, headers });
     if (!res.ok) {
       throw new ApiError('UPSTREAM_HTTP', `上游返回 HTTP ${res.status}`, res.status === 404 ? 404 : 502);
     }
@@ -148,7 +219,10 @@ export async function getAccountProfile() {
   if (!runtimeCookie) return { logged: false, profile: null };
   const data = await upstream('/user/account');
   const profile = data?.profile;
-  if (!profile) return { logged: false, profile: null };
+  if (!profile) {
+    // 凭据可能已失效，但也可能是上游临时抖动：只如实上报，不自动删除用户凭据。
+    return { logged: false, profile: null, reason: 'credential_invalid' };
+  }
   return {
     logged: true,
     profile: {
@@ -173,7 +247,7 @@ export async function getLikedSongs() {
   const uid = account?.profile?.userId;
   if (!uid) throw new ApiError('LOGIN_REQUIRED', '登录后可见你的收藏', 401);
   const playlists = await upstream('/user/playlist', { uid, limit: 5 });
-  // specialType 5 正是"我喜欢的音乐"私密歌单；兜底取第一张
+  // specialType 5 正是「我喜欢的音乐」私密歌单；兜底取第一张
   const likes = playlists?.playlist?.find((p) => p.specialType === 5) || playlists?.playlist?.[0];
   if (!likes?.id) return [];
   // 全量拉取：trackCount 就是真实收藏数，按它取（上限 3000 兜底）。
@@ -202,7 +276,6 @@ export async function getSection(key) {
       let tracks;
       let subtitle = accountConfig.subtitle;
       if (key === 'daily') {
-        // 网易云官方每日只发 ~30 首，如实标注总量。
         tracks = await getDailySongs();
         subtitle = `${tracks.length} 首 · 官方每日推送`;
       } else {
@@ -316,185 +389,287 @@ export async function getSimilar(id) {
   });
 }
 
+// —— 取流：统一走 /api/audio/:id 本地代理，不再把 CDN 直链交给客户端 ——
+
 function levelChain(level) {
+  if (!LEVELS.includes(level)) throw new GuardError('BAD_LEVEL', '音质参数不合法', 400);
   const index = LEVELS.indexOf(level);
-  if (index < 0) return ['standard'];
   return [...new Set([level, ...LEVELS.slice(0, index).reverse()])];
 }
 
-export async function getTrackUrl(id, { fee = 0, level = 'standard' } = {}) {
-  if (!/^\d+$/.test(String(id))) throw new ApiError('BAD_ID', '歌曲 id 不合法', 400);
-
-  if (runtimeCookie) {
-    let lastReason = 'no_copyright';
-    for (const quality of levelChain(level)) {
-      try {
-        const data = await upstream('/song/url/v1', {
-          id,
-          level: quality,
-          encodeType: quality === 'lossless' ? 'flac' : 'mp3',
-        });
-        if (Number(data?.code) === -462 || Number(data?.code) === 301) {
-          setRuntimeCookie('');
-          throw new ApiError('RISK_CONTROL', '登录状态已失效，请重新扫码登录', 401);
-        }
-        const item = data?.data?.[0];
-        if (item?.url) {
-          return {
-            url: toHttps(item.url),
-            level: item.level || quality,
-            br: Number(item.br || 0),
-            size: Number(item.size || 0),
-            trial: Boolean(item.freeTrialInfo),
-            expireAt: Date.now() + Math.max(60, Number(item.expi || 3600)) * 1000,
-            reason: null,
-          };
-        }
-        if (item?.freeTrialInfo) lastReason = 'vip_required';
-      } catch (error) {
-        if (error?.code === 'RISK_CONTROL') throw error;
-        lastReason = error.code === 'UPSTREAM_TIMEOUT' ? 'network' : 'no_copyright';
-      }
-    }
-    return {
-      url: null,
-      reason: lastReason,
-      message:
-        lastReason === 'vip_required'
-          ? '这首歌需要 VIP，当前账号只能试听'
-          : lastReason === 'network'
-            ? '获取播放地址超时'
-            : '该歌曲暂无版权或音源',
-    };
-  }
-
-  if (fee === 1 || fee === 4) {
-    return {
-      url: null,
-      reason: 'login_required',
-      message: 'VIP / 付费歌曲，登录后可播放',
-    };
-  }
-
-  // 匿名模式：不再请求注定 404 的 /song/url/v1。
-  // 由本地后端代理音频流，既避免 http 混合内容，也能统一错误处理。
-  return {
-    url: `/api/audio/${encodeURIComponent(id)}`,
-    level: 'standard',
-    br: 0,
-    size: 0,
-    trial: false,
-    expireAt: Date.now() + 2 * 60 * 60 * 1000,
-    reason: null,
-  };
+/** content-type 必须是真音频；`text/html; audio=1` 这类伪造标签不再能通过。 */
+function isAudioType(type) {
+  const value = String(type || '').split(';')[0].trim().toLowerCase();
+  if (/html|json|xml|javascript|text\//.test(value)) return false;
+  return value.startsWith('audio/') || value === 'application/octet-stream';
 }
 
-async function resolveAudioUrl(id) {
-  return wrap(`audio:${id}`, CACHE_TTL.audio, async () => {
-    // 已登录：直接走完整音源接口拿 CDN 地址（https，可试听/完整播放）。
+function noteRiskControl() {
+  // -462/301 多为临时风控：只计数、保留凭据，绝不因为一次取流就清空用户登录态。
+  riskControlHits += 1;
+}
+
+function upstreamReason(error) {
+  if (error?.code === 'UPSTREAM_TIMEOUT') return 'network';
+  if (error?.code === 'UPSTREAM_NETWORK' || error?.code === 'UPSTREAM_HTTP' || error?.code === 'UPSTREAM_FORMAT') {
+    return 'upstream_error';
+  }
+  return 'no_copyright';
+}
+
+function reasonMessage(reason) {
+  if (reason === 'vip_required') return '这首歌需要 VIP，当前账号只能试听';
+  if (reason === 'upstream_error') return '音乐服务暂时不可用，请稍后重试';
+  if (reason === 'network') return '获取播放地址超时，请稍后重试';
+  return '该歌曲暂无版权或音源';
+}
+
+/**
+ * 解析出可播放的真实上游地址（仅服务端内部使用，绝不返回给客户端）。
+ * 登录态走 /song/url/v1；匿名走免费外链。所有 URL 都经过白名单校验。
+ */
+async function fetchDirectUrl(id, level = 'standard') {
+  if (!/^\d+$/.test(String(id))) throw new GuardError('BAD_ID', '歌曲 id 不合法', 400);
+
+  return wrap(`direct:${id}:${level}`, CACHE_TTL.audio, async () => {
     if (runtimeCookie) {
-      const info = await getTrackUrl(id, { level: 'exhigh' });
-      if (info.url) return info.url;
-      throw new ApiError('NO_AUDIO', info.message || '该歌曲暂无可用音源', 404);
+      let lastReason = 'no_copyright';
+      for (const quality of levelChain(level)) {
+        try {
+          const data = await upstream('/song/url/v1', {
+            id,
+            level: quality,
+            encodeType: quality === 'lossless' ? 'flac' : 'mp3',
+          });
+          const code = Number(data?.code);
+          if (code === -462 || code === 301) {
+            noteRiskControl();
+            throw new ApiError('RISK_CONTROL', '登录状态触发风控，请稍后重试', 429);
+          }
+          const item = data?.data?.[0];
+          if (item?.url) {
+            riskControlHits = 0;
+            return {
+              url: assertSafeAudioUrl(item.url),
+              level: LEVELS.includes(item.level) ? item.level : quality,
+              br: Number(item.br || 0),
+              size: Number(item.size || 0),
+              trial: Boolean(item.freeTrialInfo),
+              expireAt: Date.now() + Math.max(60, Number(item.expi || 3600)) * 1000,
+            };
+          }
+          if (item?.freeTrialInfo) lastReason = 'vip_required';
+        } catch (error) {
+          if (error?.code === 'RISK_CONTROL' || error instanceof GuardError) throw error;
+          lastReason = upstreamReason(error);
+        }
+      }
+      throw new ApiError('NO_AUDIO', reasonMessage(lastReason), 404);
     }
 
-    // 匿名：免费外链兜底链。
+    // 匿名：免费外链兜底链。逐跳校验 302 目标，避免上游被污染后打进内网。
     const target = `https://music.163.com/song/media/outer/url?id=${encodeURIComponent(id)}.mp3`;
+    const probeInit = { headers: { 'user-agent': UA } };
+    let finalUrl = '';
+    let ok = false;
 
-    // 匿名：免费外链兜底链。探测请求都要带超时，CDN 卡死不能拖死连接。
-    let res = await fetch(target, {
-      method: 'HEAD',
-      redirect: 'follow',
-      signal: AbortSignal.timeout(10000),
-      headers: { 'user-agent': UA },
-    });
-    let type = res.headers.get('content-type') || '';
-    if (/audio/i.test(type)) return res.url;
+    const head = await fetchGuardedAudio(target, { ...probeInit, method: 'HEAD' }, { headerTimeout: AUDIO_HEADER_TIMEOUT });
+    finalUrl = head.finalUrl;
+    ok = (head.response.status === 200 || head.response.status === 206) && isAudioType(head.response.headers.get('content-type'));
+    await head.response.body?.cancel().catch(() => {});
+    head.controller.abort();
 
-    // 少数 CDN 不支持 HEAD，退回 Range 探测。
-    res = await fetch(target, {
-      redirect: 'follow',
-      signal: AbortSignal.timeout(10000),
-      headers: { 'user-agent': UA, Range: 'bytes=0-0' },
-    });
-    type = res.headers.get('content-type') || '';
-    const finalUrl = res.url;
-    await res.body?.cancel().catch(() => {});
-    if (!/audio/i.test(type)) {
-      throw new ApiError('NO_AUDIO', '该歌曲暂无可用音源', 404);
+    if (!ok) {
+      // 少数 CDN 不支持 HEAD，退回 Range 探测。
+      const ranged = await fetchGuardedAudio(
+        target,
+        { ...probeInit, method: 'GET', headers: { 'user-agent': UA, Range: 'bytes=0-0' } },
+        { headerTimeout: AUDIO_HEADER_TIMEOUT }
+      );
+      finalUrl = ranged.finalUrl;
+      ok =
+        (ranged.response.status === 200 || ranged.response.status === 206) &&
+        isAudioType(ranged.response.headers.get('content-type'));
+      await ranged.response.body?.cancel().catch(() => {});
+      ranged.controller.abort();
     }
-    return finalUrl;
+
+    if (!ok) throw new ApiError('NO_AUDIO', '该歌曲暂无可用音源', 404);
+    return {
+      url: assertSafeAudioUrl(finalUrl),
+      level: 'standard',
+      br: 0,
+      size: 0,
+      trial: false,
+      expireAt: Date.now() + CACHE_TTL.audio,
+    };
   });
 }
 
-export async function proxyAudio(id, req, res) {
-  const range = req.headers.range;
-  const requestUpstream = (url) =>
-    fetch(url, {
-      method: req.method === 'HEAD' ? 'HEAD' : 'GET',
-      redirect: 'follow',
-      // CDN 偶发挂起：探测+拉流全程限时，防止 socket 被永久占用。
-      signal: AbortSignal.timeout(20000),
-      headers: {
-        'user-agent': UA,
-        ...(range ? { Range: range } : {}),
-      },
-    });
+export async function getTrackUrl(id, { fee = 0, level = 'standard' } = {}) {
+  if (!/^\d+$/.test(String(id))) throw new GuardError('BAD_ID', '歌曲 id 不合法', 400);
+  if (!LEVELS.includes(level)) throw new GuardError('BAD_LEVEL', '音质参数不合法', 400);
 
-  let finalUrl = await resolveAudioUrl(id);
-  let upstreamRes = await requestUpstream(finalUrl);
-
-  const isAudio = (response) =>
-    (response.status === 200 || response.status === 206) &&
-    /audio/i.test(response.headers.get('content-type') || '');
-
-  if (!isAudio(upstreamRes)) {
-    await upstreamRes.body?.cancel().catch(() => {});
-    del(`audio:${id}`);
-    finalUrl = await resolveAudioUrl(id);
-    upstreamRes = await requestUpstream(finalUrl);
+  // fee 只用来给 UI 一个提前提示，真正的权限门禁由音源接口决定，不信任客户端传值。
+  if (!runtimeCookie && (fee === 1 || fee === 4)) {
+    return { url: null, reason: 'login_required', message: 'VIP / 付费歌曲，登录后可播放' };
   }
 
-  if (!isAudio(upstreamRes)) {
-    await upstreamRes.body?.cancel().catch(() => {});
-    throw new ApiError('NO_AUDIO', '该歌曲暂无可用音源', 404);
+  try {
+    const info = await fetchDirectUrl(id, level);
+    const resolvedLevel = LEVELS.includes(info.level) ? info.level : level;
+    return {
+      url: `/api/audio/${encodeURIComponent(id)}?level=${encodeURIComponent(resolvedLevel)}`,
+      level: resolvedLevel,
+      br: info.br,
+      size: info.size,
+      trial: info.trial,
+      expireAt: info.expireAt,
+      reason: null,
+    };
+  } catch (error) {
+    if (error?.code === 'RISK_CONTROL') {
+      return { url: null, reason: 'risk_control', message: `账号触发风控（连续 ${riskControlHits} 次），请稍后重试或重新扫码登录` };
+    }
+    if (error?.code === 'NO_AUDIO') {
+      return { url: null, reason: 'no_copyright', message: error.message };
+    }
+    if (error?.code === 'LOGIN_REQUIRED') {
+      return { url: null, reason: 'login_required', message: error.message };
+    }
+    if (error instanceof GuardError || error?.code?.startsWith?.('AUDIO_') || error?.code === 'TOO_MANY_REDIRECTS') {
+      console.error(`[audio] 音源被安全策略拒绝：${error.code || error.name}: ${error.message}`);
+      return { url: null, reason: 'upstream_error', message: '音源地址异常，已阻止请求' };
+    }
+    return { url: null, reason: 'upstream_error', message: '音乐服务暂时不可用，请稍后重试' };
   }
+}
 
-  const headers = {
-    'Content-Type': upstreamRes.headers.get('content-type') || 'audio/mpeg',
+function audioError(error) {
+  if (error instanceof ApiError) return error;
+  if (error instanceof GuardError) {
+    return new ApiError(error.code, '音源地址异常或连接失败', error.status || 502);
+  }
+  return new ApiError('UPSTREAM_ERROR', '无法获取音频流', 502);
+}
+
+function sendRangeError(res, contentRange = 'bytes */0') {
+  res.writeHead(416, {
+    ...SECURITY_HEADERS,
     'Accept-Ranges': 'bytes',
+    'Content-Range': contentRange,
     'Cache-Control': 'no-store',
-  };
-  for (const name of ['content-length', 'content-range', 'last-modified', 'etag']) {
-    const value = upstreamRes.headers.get(name);
-    if (value) headers[name] = value;
-  }
-  res.writeHead(upstreamRes.status, headers);
-  if (req.method === 'HEAD' || !upstreamRes.body) {
-    res.end();
+  });
+  res.end();
+}
+
+async function openAudioStream(id, level, req, range) {
+  const info = await fetchDirectUrl(id, level);
+  return fetchGuardedAudio(
+    info.url,
+    {
+      method: req.method === 'HEAD' ? 'HEAD' : 'GET',
+      headers: { 'user-agent': UA, ...(range ? { Range: range } : {}) },
+    },
+    { headerTimeout: AUDIO_HEADER_TIMEOUT }
+  );
+}
+
+export async function proxyAudio(id, req, res, { level = 'standard' } = {}) {
+  const rawRange = req.headers.range ? String(req.headers.range).trim() : '';
+  // Range 只允许单段、纯数字，避免把任意头透传给上游。
+  if (rawRange && !/^bytes=\d*-\d*$/.test(rawRange)) {
+    sendRangeError(res);
     return;
   }
-  await pipeline(Readable.fromWeb(upstreamRes.body), res);
+
+  let stream;
+  let streamController;
+  try {
+    stream = await openAudioStream(id, level, req, rawRange);
+    streamController = stream.controller;
+
+    const isAcceptable = (response) =>
+      (response.status === 200 || response.status === 206) && isAudioType(response.headers.get('content-type'));
+
+    if (!isAcceptable(stream.response)) {
+      await stream.response.body?.cancel().catch(() => {});
+      stream.controller.abort();
+      // CDN 地址过期：清掉解析缓存后重试一次。
+      del(`direct:${id}:${level}`);
+      stream = await openAudioStream(id, level, req, rawRange);
+      streamController = stream.controller;
+    }
+
+    const upstreamRes = stream.response;
+    if (upstreamRes.status === 416) {
+      await upstreamRes.body?.cancel().catch(() => {});
+      streamController.abort();
+      sendRangeError(res, upstreamRes.headers.get('content-range') || 'bytes */0');
+      return;
+    }
+    if (!isAcceptable(upstreamRes)) {
+      await upstreamRes.body?.cancel().catch(() => {});
+      streamController.abort();
+      throw new ApiError('NO_AUDIO', '该歌曲暂无可用音源', 404);
+    }
+
+    const headers = {
+      ...SECURITY_HEADERS,
+      'Content-Type': upstreamRes.headers.get('content-type') || 'audio/mpeg',
+      'Accept-Ranges': 'bytes',
+      'Cache-Control': 'no-store',
+    };
+    for (const name of ['content-length', 'content-range', 'last-modified', 'etag']) {
+      const value = upstreamRes.headers.get(name);
+      if (value) headers[name] = value;
+    }
+    res.writeHead(upstreamRes.status, headers);
+    // 客户端断开（切歌/关页面）时立刻停止拉上游，别让 CDN 连接挂着。
+    res.on('close', () => {
+      if (!res.writableEnded) streamController.abort();
+    });
+
+    if (req.method === 'HEAD' || !upstreamRes.body) {
+      res.end();
+      streamController.abort();
+      return;
+    }
+    try {
+      await pipeline(Readable.fromWeb(upstreamRes.body), res);
+    } catch (error) {
+      if (error?.code !== 'ERR_STREAM_PREMATURE_CLOSE' && error?.name !== 'AbortError') throw error;
+    }
+  } catch (error) {
+    streamController?.abort();
+    throw audioError(error);
+  }
 }
 
 // —— 扫码登录（复用 uni-netease 二维码接口，全程本地回环）——
 
-/** 创建二维码：{ key, qrimg(dataURL) }；过期或失败按 ApiError 抛出。 */
+/** 创建二维码：{ key, qrimg(dataURL) }；上游缺字段一律报错，不拿 code 当 key。 */
 export async function loginQrCreate() {
   const keyData = await upstream('/login/qr/key', { timestamp: Date.now() }, { cookie: '' });
-  const key = keyData?.data?.unikey || keyData?.unikey || keyData?.code;
-  if (!key) throw new ApiError('LOGIN_QR', '上游未返回登录 key', 502);
+  const key = keyData?.data?.unikey || keyData?.unikey;
+  if (typeof key !== 'string' || !/^[0-9a-zA-Z_-]{8,}$/.test(key)) {
+    throw new ApiError('LOGIN_QR', '上游未返回有效的登录 key', 502);
+  }
   const qr = await upstream('/login/qr/create', { key, qrimg: 1, timestamp: Date.now() }, { cookie: '' });
   const qrimg = qr?.data?.qrimg || qr?.qrimg || '';
+  if (typeof qrimg !== 'string' || !/^data:image\//i.test(qrimg)) {
+    throw new ApiError('LOGIN_QR', '上游未返回二维码图片，请稍后重试', 502);
+  }
   return { key, qrimg };
 }
 
 /**
  * 轮询二维码状态：
  * 800 过期 / 801 等待扫码 / 802 已扫码待确认 / 200 或 803 登录成功。
+ * key 由 /api/login/qr 在本进程登记，index.js 会先校验会话归属。
  */
 export async function loginQrCheck(key) {
-  if (!/^[0-9a-zA-Z-]+$/.test(String(key || ''))) throw new ApiError('BAD_KEY', 'key 不合法', 400);
+  if (!/^[0-9a-zA-Z_-]+$/.test(String(key || ''))) throw new GuardError('BAD_KEY', 'key 不合法', 400);
   const data = await upstream('/login/qr/check', { key, timestamp: Date.now() }, { cookie: '' });
   const code = Number(data?.code ?? data?.data?.code);
   let status = 'waiting';
@@ -507,8 +682,10 @@ export async function loginQrCheck(key) {
     const cookieStr = data?.cookie || data?.data?.cookie || '';
     if (cookieStr) {
       const musicU = String(cookieStr).match(/MUSIC_U=([^;\s]+)/)?.[1];
-      setRuntimeCookie(musicU ? `MUSIC_U=${musicU}` : String(cookieStr).trim());
+      const warnings = setRuntimeCookie(musicU ? `MUSIC_U=${musicU}` : String(cookieStr).trim());
+      if (warnings.length) console.warn('[login] 凭据落盘异常：', warnings.join('；'));
     }
+    riskControlHits = 0;
     let nickname = '';
     try {
       const account = await upstream('/user/account');
@@ -524,9 +701,22 @@ export async function loginQrCheck(key) {
   return { status };
 }
 
-export function logout() {
-  setRuntimeCookie('');
-  return { ok: true };
+/** 退出：清本机凭据 + 通知上游让云端 cookie 失效 + 留下防复活标记。 */
+export async function logout() {
+  const previous = runtimeCookie;
+  const warnings = setRuntimeCookie('');
+  riskControlHits = 0;
+  let cloud = 'not_needed';
+  if (previous) {
+    try {
+      await upstream('/logout', { timestamp: Date.now() }, { cookie: previous, noRetry: true, timeout: 5000 });
+      cloud = 'ok';
+    } catch {
+      cloud = 'failed';
+      warnings.push('未能通知云端使登录态失效，建议在网易云 App 中主动退出');
+    }
+  }
+  return { ok: warnings.length === 0, cloud, warnings };
 }
 
 export function sectionsMeta() {

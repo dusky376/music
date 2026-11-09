@@ -213,7 +213,17 @@ const { createRequire } = await import('node:module');
 const requireCjs = createRequire(new URL('./', import.meta.url)); // 锚定 tests/，跨包加载 miniprogram（type: commonjs）
 
 class FakeAudio {
-  constructor() { this.src = ''; this.cb = {}; }
+  constructor() {
+    this.src = '';
+    this.cb = {};
+    // BackgroundAudioManager 必填/可选字段
+    this.title = '';
+    this.singer = '';
+    this.coverImgUrl = '';
+    this.epname = '';
+    this.currentTime = 0;
+    this.duration = 0;
+  }
   _on(name, fn) { this.cb[name] = fn; return this; }
   onCanplay(fn) { return this._on('canplay', fn); }
   onPlay(fn) { return this._on('play', fn); }
@@ -228,29 +238,59 @@ class FakeAudio {
   pause() {}
   stop() { this.stopped = (this.stopped || 0) + 1; }
   destroy() { this.destroyed = (this.destroyed || 0) + 1; }
-  seek() {}
+  seek(sec) { this.seeked = sec; }
 }
 
 const audioInstance = new FakeAudio();
 const app = {}; // App(options) 写入
+// 记录所有 wx.request，便于断言取流门禁链路确实被调用
+const requests = [];
 global.wx = {
+  // 新版走后台音频单例；同时保留 innerAudioContext 降级桩
+  getBackgroundAudioManager: () => audioInstance,
   createInnerAudioContext: () => audioInstance,
-  getStorageSync: () => '', // 播放模式持久化读取桩
+  onAudioInterruptionBegin: () => {},
+  onAudioInterruptionEnd: () => {},
+  showToast: () => {},
+  getStorageSync: () => '',
   setStorageSync: () => {},
+  // 同步回调模拟后端：/api/session 发 token，/api/track/:id/url 返回同源音源
+  request: (opts) => {
+    requests.push(opts.url);
+    const url = String(opts.url || '');
+    let data = {};
+    if (url.includes('/api/session')) data = { token: 'test-token', exposeLan: false };
+    else if (/\/api\/track\/(\d+)\/url/.test(url)) {
+      const id = url.match(/\/api\/track\/(\d+)\/url/)[1];
+      data = { url: `/api/audio/${id}?level=standard`, level: 'standard', reason: null };
+    }
+    opts.success?.({ statusCode: 200, data });
+  },
 };
 global.getCurrentPages = () => [];
 global.App = (options) => Object.assign(app, options);
 requireCjs('../miniprogram/app.js');
+
+/** 让 wx.request 的回调 + Promise.then 链路全部落地。 */
+const flush = async () => {
+  for (let i = 0; i < 16; i += 1) await Promise.resolve();
+};
 
 const resetApp = () => {
   app.globalData.queue = [];
   app.globalData.index = -1;
   app.globalData.status = 'idle';
   app.failStreak = 0;
+  // 单例音频不销毁，但重置绑定标记，让每组测试都能重新注册事件
+  app.audio = null;
+  app._bgBound = false;
+  app._playTicket = 0;
+  requests.length = 0;
   audioInstance.src = '';
   audioInstance.cb = {};
   audioInstance.stopped = 0;
   audioInstance.played = 0;
+  audioInstance.destroyed = 0;
 };
 
 await group('miniprogram/app', async () => {
@@ -274,7 +314,7 @@ await group('miniprogram/app', async () => {
     assert.equal(got.length, 1, 'unsubscribe should stop events');
   });
 
-  await test('切歌必须真的换 src（回归：_listeners 未初始化时这里炸掉）', () => {
+  await test('切歌必须真的换 src（回归：_listeners 未初始化时这里炸掉）', async () => {
     resetApp();
     app.globalData.queue = [
       { id: '1', fee: 0, name: 'A' },
@@ -283,18 +323,21 @@ await group('miniprogram/app', async () => {
     ];
     audioInstance.src = 'http://x:8787/api/audio/1';
     app.playAt.call(app, 2);
+    await flush();
     assert.ok(audioInstance.src.includes('/api/audio/3'), `src=${audioInstance.src}`);
     assert.equal(app.globalData.index, 2);
-    assert.ok(audioInstance.destroyed >= 1, '换源必须销毁重建实例（否则继承上一首的播放秒数）');
+    assert.ok(audioInstance.stopped >= 1, '换源必须先 stop（后台音频单例）');
+    assert.ok(requests.some((u) => u.includes('/api/track/3/url')), '应走服务端取流门禁接口');
   });
 
-  await test('混合队列：点 VIP 歌自动落下一个可播首', () => {
+  await test('混合队列：点 VIP 歌自动落下一个可播首', async () => {
     resetApp();
     app.globalData.queue = [
       { id: '1', fee: 1, name: 'vip' },
       { id: '2', fee: 0, name: 'free' },
     ];
     app.playAt.call(app, 0);
+    await flush();
     assert.equal(app.globalData.index, 1, 'auto landed on free track');
     assert.ok(audioInstance.src.includes('/api/audio/2'));
   });
@@ -317,7 +360,7 @@ await group('miniprogram/app', async () => {
     assert.equal(app.globalData.status, 'idle');
   });
 
-  await test('fee 8（免费试听）可播——回归：误判 8 为 VIP 会让扫描绕回第一首', () => {
+  await test('fee 8（免费试听）可播——回归：误判 8 为 VIP 会让扫描绕回第一首', async () => {
     resetApp();
     app.globalData.queue = [
       { id: '1', fee: 0 },
@@ -325,8 +368,39 @@ await group('miniprogram/app', async () => {
       { id: '3', fee: 8 },
     ];
     app.playAt.call(app, 2);
+    await flush();
     assert.equal(app.globalData.index, 2, 'fee 8 plays in place');
     assert.ok(audioInstance.src.includes('/api/audio/3'));
+  });
+
+  await test('后台音频必填 title/singer，切歌竞态只保留最后一次', async () => {
+    resetApp();
+    app.globalData.queue = [
+      { id: '1', fee: 0, name: '第一首', artist: '甲', album: '专辑一' },
+      { id: '2', fee: 0, name: '第二首', artist: '乙', album: '专辑二' },
+    ];
+    app.playAt.call(app, 0);
+    app.playAt.call(app, 1);
+    await flush();
+    assert.ok(audioInstance.src.includes('/api/audio/2'), `竞态后应播最后一首，src=${audioInstance.src}`);
+    assert.equal(audioInstance.title, '第二首', 'BackgroundAudioManager 必填 title');
+    assert.equal(audioInstance.singer, '乙');
+    assert.equal(app.globalData.index, 1);
+  });
+
+  await test('流式音源 duration 为 0 时用 track.duration 兜底', async () => {
+    resetApp();
+    app.globalData.queue = [{ id: '1', fee: 0, name: 'A', duration: 215 }];
+    app.globalData.index = 0; // 让 current() 指向该曲目
+    app.onLaunch.call(app);
+    const seen = [];
+    const dispose = app.subscribe.call(app, 'time', (d) => seen.push(d));
+    audioInstance.duration = 0;
+    audioInstance.currentTime = 12;
+    audioInstance.fire('timeupdate');
+    dispose();
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].duration, 215, '总时长不能恒为 0');
   });
 
   await test('playNext/playPrev 双向环绕且跳过 VIP', () => {

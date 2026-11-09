@@ -1,12 +1,13 @@
 import {
   checkLoginQr,
   createLoginQr,
-  getLoginStatus,
+  getLoginStatusOnce,
   getUser,
   logoutServer,
 } from '../core/api.js';
-import { on } from '../core/bus.js';
+import { emit, on } from '../core/bus.js';
 import { saveJSON, loadJSON } from '../core/storage.js';
+import { activateDialog, deactivateDialog } from './dialog.js';
 import { showToast } from './toast.js';
 
 const overlay = document.getElementById('loginOverlay');
@@ -32,8 +33,12 @@ const STATUS_TEXT = {
 
 let pollTimer = 0;
 let state = loadJSON('pt_login', { nickname: '' });
+let lastStatus = '';
 
 function setStatus(text) {
+  // 文本去重：轮询里相同状态不重复写 DOM，避免 aria-live 每 2 秒打断读屏。
+  if (text === lastStatus) return;
+  lastStatus = text;
   if (statusEl) statusEl.textContent = text;
 }
 
@@ -109,17 +114,24 @@ async function startPolling(key, token) {
         setStatus('登录成功');
         showToast(result.nickname ? `欢迎，${result.nickname}` : '登录成功', 2600);
         stopPolling();
+        emit('login:changed', { logged: true });
         setTimeout(closeDialog, 1200);
         return;
       }
-      if (statusId === 'scanned') setStatus(STATUS_TEXT.scanned);
-      if (statusId === 'expired') {
+      if (statusId === 'scanned') {
+        setStatus(STATUS_TEXT.scanned);
+      } else if (statusId === 'expired') {
         setMask('二维码已过期', true);
         setStatus(STATUS_TEXT.expired);
         stopPolling();
         return;
+      } else {
+        // 轮询正常但仍在等待：从网络波动里恢复时把文案纠正回来，
+        // 相同文本由 setStatus 去重，不会每 2 秒打断读屏。
+        setStatus(STATUS_TEXT.waiting);
       }
     } catch {
+      // 仅首次进入失败态写一次，之后相同文本被 setStatus 去重。
       setStatus('网络波动，仍在轮询…');
     }
     pollTimer = setTimeout(tick, 2000);
@@ -138,11 +150,20 @@ async function refreshQr() {
   try {
     const { key, qrimg } = await createLoginQr();
     if (token !== pollToken) return;
-    if (qrImg) qrImg.src = qrimg || '';
+    const keyStr = key == null ? '' : String(key).trim();
+    // 后端保证不回伪 key，前端仍防御：空值、或上游把状态码(如 200)当 unikey。
+    if (!keyStr || /^\d+$/.test(keyStr) || !qrimg) {
+      // 不设 src、不报「等待扫码」、不启动轮询；显示失败遮罩让用户手动重试。
+      setStatus('二维码获取失败，请点击刷新重试');
+      setMask('二维码获取失败', true);
+      return;
+    }
+    if (qrImg) qrImg.src = qrimg;
     setStatus(STATUS_TEXT.waiting);
-    startPolling(key, token);
+    startPolling(keyStr, token);
   } catch (error) {
     setStatus(`二维码拉取失败：${error.message || '稍后再试'}`);
+    setMask('二维码获取失败', true);
   }
 }
 
@@ -152,12 +173,15 @@ function openDialog() {
   overlay.setAttribute('aria-hidden', 'false');
   refreshQr();
   refreshEntry();
+  // 焦点移入、Tab 循环、底层 inert、关闭后焦点恢复，与其它三个弹窗统一。
+  activateDialog(overlay, { initialFocus: closeBtn });
 }
 
 export function closeDialog() {
   if (!overlay) return;
   pollToken += 1;
   stopPolling();
+  deactivateDialog(overlay);
   overlay.classList.remove('active');
   overlay.setAttribute('aria-hidden', 'true');
 }
@@ -187,13 +211,16 @@ export function initLogin() {
     refreshEntry();
     closeDialog();
     showToast('已退出登录', 2000);
+    emit('login:changed', { logged: false });
   });
 
   refreshEntry();
   // 启动时对齐一次服务端登录态（例如换浏览器打开时）。
-  getLoginStatus()
+  getLoginStatusOnce()
     .then((info) => {
-      if (info?.logged) {
+      const logged = Boolean(info?.logged);
+      const localLogged = Boolean(state.nickname);
+      if (logged) {
         // 有服务端登录态就同步资料：老用户补头像/真昵称，本地昵称只是占位。
         if (!state.nickname) {
           state = { ...state, nickname: '已登录' };
@@ -201,11 +228,13 @@ export function initLogin() {
           refreshEntry();
         }
         syncProfile();
-      } else if (!info?.logged && state.nickname) {
+      } else if (state.nickname) {
         state = { nickname: '' };
         saveJSON('pt_login', state);
         refreshEntry();
       }
+      // 服务端登录态与本地不一致时广播，供默认筛选以服务端为准重算。
+      if (logged !== localLogged) emit('login:changed', { logged });
     })
     .catch(() => {});
 

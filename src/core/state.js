@@ -17,6 +17,8 @@ export const store = {
   shuffle: false,
   quality: 'standard',
   filterPlayable: false,
+  // 只有用户主动点过「只看可播放」才算手动设置；默认策略才能随登录态重算。
+  filterManuallySet: false,
   favorites: Array.isArray(storedFavorites) ? storedFavorites.map(cleanTrack).filter(Boolean) : [],
   history: Array.isArray(storedHistory) ? storedHistory.map(cleanTrack).filter(Boolean).slice(0, 50) : [],
   lyrics: [],
@@ -70,6 +72,7 @@ export function saveSettings() {
     shuffle: store.shuffle,
     quality: store.quality,
     filterPlayable: store.filterPlayable,
+    filterManuallySet: store.filterManuallySet,
   });
 }
 
@@ -80,4 +83,17 @@ export function loadSettings() {
   store.shuffle = Boolean(settings.shuffle);
   if (typeof settings.quality === 'string') store.quality = settings.quality;
   if (typeof settings.filterPlayable === 'boolean') store.filterPlayable = settings.filterPlayable;
+  store.filterManuallySet = Boolean(settings.filterManuallySet);
+}
+
+/**
+ * 「只看可播放」是全局规则：导航的渲染、播放全部、空态起播都必须用同一份过滤结果，
+ * 否则筛选开启时会播到列表里被隐藏的 VIP 歌（审查报告第 3 节 bug 9）。
+ */
+export function playableTracks(list) {
+  const tracks = Array.isArray(list) ? list : [];
+  if (!store.filterPlayable) return tracks;
+  return tracks.filter(
+    (track) => Boolean(track) && !track.vip && !track.paid && !store.unavailable.has(String(track.id))
+  );
 }

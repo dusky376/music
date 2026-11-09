@@ -1,5 +1,6 @@
 import { on } from '../core/bus.js';
 import { store } from '../core/state.js';
+import { activateDialog, deactivateDialog } from './dialog.js';
 import { loadComments } from './comments.js';
 import { ensureLyrics, scrollLyricsToCurrent } from './lyrics.js';
 import { closeQueue } from './queue.js';
@@ -11,13 +12,15 @@ const dismissBtn = document.getElementById('dismissModalBtn');
 const lyricsBtn = document.getElementById('switchLyricsBtn');
 const commentsBtn = document.getElementById('switchCommentsBtn');
 const similarBtn = document.getElementById('switchSimilarBtn');
+const switcher = document.querySelector('.modal-switcher');
 const lyricsViewport = document.getElementById('lyricsViewport');
 const commentsStream = document.getElementById('commentsStream');
 const similarStream = document.getElementById('similarStream');
 const brief = document.getElementById('dockTrackBrief');
 const lyricDockBtn = document.getElementById('dockLyricBtn');
 const commentDockBtn = document.getElementById('dockCommentBtn');
-let lastFocus = null;
+const tabs = [lyricsBtn, commentsBtn, similarBtn];
+const tabNames = ['lyrics', 'comments', 'similar'];
 let commentsLoadedFor = '';
 let similarLoadedFor = '';
 
@@ -26,15 +29,20 @@ function setTab(tab) {
   store.activeRightTab = allowed;
   const isLyrics = allowed === 'lyrics';
   const isComments = allowed === 'comments';
+  const isSimilar = allowed === 'similar';
   lyricsBtn?.classList.toggle('active', isLyrics);
   commentsBtn?.classList.toggle('active', isComments);
-  similarBtn?.classList.toggle('active', allowed === 'similar');
+  similarBtn?.classList.toggle('active', isSimilar);
+  // aria-selected 与 roving tabindex 同步：只有选中 tab 进入 Tab 序列
   lyricsBtn?.setAttribute('aria-selected', String(isLyrics));
+  lyricsBtn?.setAttribute('tabindex', isLyrics ? '0' : '-1');
   commentsBtn?.setAttribute('aria-selected', String(isComments));
-  similarBtn?.setAttribute('aria-selected', String(allowed === 'similar'));
+  commentsBtn?.setAttribute('tabindex', isComments ? '0' : '-1');
+  similarBtn?.setAttribute('aria-selected', String(isSimilar));
+  similarBtn?.setAttribute('tabindex', isSimilar ? '0' : '-1');
   if (lyricsViewport) lyricsViewport.hidden = !isLyrics;
   if (commentsStream) commentsStream.hidden = !isComments;
-  if (similarStream) similarStream.hidden = allowed !== 'similar';
+  if (similarStream) similarStream.hidden = !isSimilar;
 
   if (isLyrics) {
     ensureLyrics(store.currentTrack);
@@ -62,13 +70,13 @@ export function openImmersive(tab = 'lyrics') {
     return;
   }
   if (store.queuePanelOpen) closeQueue();
-  lastFocus = document.activeElement;
   store.immersiveOpen = true;
   panel?.classList.add('active');
   panel?.setAttribute('aria-hidden', 'false');
   document.body.classList.add('immersive-open');
   setTab(tab);
-  setTimeout(() => dismissBtn?.focus({ preventScroll: true }), 120);
+  // 焦点移入 / Tab 循环 / 底层 inert 交给共享基座，移除手写 lastFocus
+  activateDialog(panel, { initialFocus: dismissBtn });
 }
 
 export function closeImmersive() {
@@ -77,8 +85,7 @@ export function closeImmersive() {
   panel?.classList.remove('active');
   panel?.setAttribute('aria-hidden', 'true');
   document.body.classList.remove('immersive-open');
-  if (lastFocus instanceof HTMLElement) lastFocus.focus({ preventScroll: true });
-  lastFocus = null;
+  deactivateDialog(panel);
 }
 
 export function toggleImmersive(tab = 'lyrics') {
@@ -86,8 +93,26 @@ export function toggleImmersive(tab = 'lyrics') {
   else openImmersive(tab);
 }
 
+// tablist 方向键：Left/Right/Home/End 切换并同步 aria-selected
+function handleTabKeys(event) {
+  const index = tabs.indexOf(document.activeElement);
+  if (index < 0) return;
+  let next = -1;
+  if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+  else if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+  else if (event.key === 'Home') next = 0;
+  else if (event.key === 'End') next = tabs.length - 1;
+  else return;
+  event.preventDefault();
+  // 阻止冒泡到全局快捷键监听，避免左右键同时触发快退 / 快进
+  event.stopPropagation();
+  setTab(tabNames[next]);
+  tabs[next]?.focus();
+}
+
 export function initImmersive() {
   dismissBtn?.addEventListener('click', closeImmersive);
+  switcher?.addEventListener('keydown', handleTabKeys);
   lyricsBtn?.addEventListener('click', () => setTab('lyrics'));
   commentsBtn?.addEventListener('click', () => setTab('comments'));
   similarBtn?.addEventListener('click', () => setTab('similar'));

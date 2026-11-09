@@ -1,5 +1,6 @@
 import { adjustVolume, next, prev, seek, getCurrentTime, toggle, toggleMute } from '../core/player.js';
 import { store, toggleFavorite } from '../core/state.js';
+import { activateDialog, deactivateDialog } from './dialog.js';
 import { closeImmersive, toggleImmersive } from './immersive.js';
 import { closeSidebar } from './nav.js';
 import { closeQueue, toggleQueue } from './queue.js';
@@ -12,13 +13,16 @@ function openShortcuts() {
   if (!overlay) return;
   overlay.classList.add('active');
   overlay.setAttribute('aria-hidden', 'false');
-  overlay.querySelector('.shortcut-panel')?.focus?.();
+  const panel = overlay.querySelector('.shortcut-panel');
+  // 焦点移入 / Tab 循环 / 底层 inert；初始焦点落在关闭按钮
+  activateDialog(panel, { initialFocus: overlay.querySelector('[data-close-shortcuts]') });
 }
 
 function closeShortcuts() {
   if (!overlay) return;
   overlay.classList.remove('active');
   overlay.setAttribute('aria-hidden', 'true');
+  deactivateDialog(overlay.querySelector('.shortcut-panel'));
 }
 
 function isTypingTarget(target) {

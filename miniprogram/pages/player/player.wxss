@@ -104,6 +104,10 @@
   font-size: 26rpx;
 }
 
+.progress-box {
+  width: 100%; /* 包裹层必须与 .progress 同宽：防止被 flex 收缩挤压 slider 触摸区 */
+}
+
 .progress {
   width: 100%;
 }

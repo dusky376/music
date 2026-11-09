@@ -2,9 +2,21 @@ import { on } from '../core/bus.js';
 
 const container = document.getElementById('toastContainer');
 const MAX_TOASTS = 3;
+const MIN_DURATION = 2200;
+const DEDUPE_WINDOW = 1200;
+const lastShown = new Map();
 
 export function showToast(message, duration = 2600, tone = 'default', action = null) {
   if (!container || !message) return;
+  const now = Date.now();
+  // 相同文案在 1200ms 内只弹一次，避免 online/offline 抖动与续播提示堆多条。
+  const last = lastShown.get(message) || 0;
+  if (now - last < DEDUPE_WINDOW) return;
+  lastShown.set(message, now);
+  // 顺带清理过期记录，避免 Map 无限增长。
+  for (const [key, time] of lastShown) {
+    if (now - time >= DEDUPE_WINDOW) lastShown.delete(key);
+  }
   while (container.children.length >= MAX_TOASTS) {
     container.firstElementChild?.remove();
   }
@@ -21,7 +33,7 @@ export function showToast(message, duration = 2600, tone = 'default', action = n
     toast.classList.add('out');
     setTimeout(() => toast.remove(), 260);
   };
-  let timer = setTimeout(remove, Math.max(1400, duration));
+  let timer = setTimeout(remove, Math.max(MIN_DURATION, duration));
 
   if (action?.label) {
     const button = document.createElement('button');

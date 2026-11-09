@@ -1,12 +1,13 @@
 .topbar {
   position: relative;
   z-index: 40;
-  height: var(--header-h);
-  flex: 0 0 var(--header-h);
+  /* 刘海屏：把 safe-area-inset-top 计入高度，左右补安全边距 */
+  height: calc(var(--header-h) + env(safe-area-inset-top));
+  flex: 0 0 calc(var(--header-h) + env(safe-area-inset-top));
   display: flex;
   align-items: center;
   gap: 20px;
-  padding: 0 28px;
+  padding: env(safe-area-inset-top) calc(28px + env(safe-area-inset-right)) 0 calc(28px + env(safe-area-inset-left));
   border-bottom: 1px solid var(--border);
   background: var(--bg-glass);
   backdrop-filter: blur(28px) saturate(170%);
@@ -81,7 +82,7 @@
   border: 1px solid transparent;
   border-radius: 13px;
   background: var(--bg-soft);
-  transition: border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
+  transition: border-color var(--dur-normal) var(--ease-out), background var(--dur-normal) var(--ease-out), box-shadow var(--dur-normal) var(--ease-out);
 }
 
 .search-inner:focus-within {
@@ -282,7 +283,7 @@
   font-weight: 550;
   cursor: pointer;
   user-select: none;
-  transition: color 160ms ease, background 160ms ease;
+  transition: color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
 }
 
 .nav-link .icon {
@@ -417,7 +418,7 @@
   color: var(--bg-elevated);
   font-size: 12.5px;
   font-weight: 650;
-  transition: transform 200ms var(--spring), box-shadow 200ms ease;
+  transition: transform 200ms var(--spring), box-shadow var(--dur-normal) var(--ease-out);
 }
 
 .hero-action-btn .icon {
@@ -441,6 +442,11 @@
 
 .track-grid-table {
   /* 仅承载 ARIA table 语义，不参与布局 */
+  display: contents;
+}
+
+/* 表头 rowgroup 用 display:contents 透传，sticky 与 grid 布局不变 */
+.track-grid-header-group {
   display: contents;
 }
 

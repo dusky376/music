@@ -7,6 +7,41 @@ const SECTION_CACHE_TTL = 6 * 60 * 60 * 1000;
 const memory = new Map();
 const inflight = new Map();
 
+// 会话令牌：所有走 request() 的 JSON 请求共用一次懒加载结果。
+// /api/session 无需 token，必须用裸 fetch 直取，避免递归调用 request()。
+let sessionToken = '';
+let sessionPromise = null;
+
+async function ensureSession() {
+  if (sessionToken) return sessionToken;
+  if (!sessionPromise) {
+    const controller = new AbortController();
+    // 会话接口自身也加超时，挂起时不能把后续所有业务请求一起拖死。
+    const timer = setTimeout(() => controller.abort(), 4000);
+    sessionPromise = fetch('/api/session', {
+      headers: { accept: 'application/json' },
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`session ${response.status}`);
+        const data = await response.json();
+        sessionToken = typeof data?.token === 'string' ? data.token : '';
+        return sessionToken;
+      })
+      .catch(() => {
+        // 取会话失败降级为空 token，业务请求照样发出，不把应用卡死。
+        sessionToken = '';
+        return '';
+      })
+      .finally(() => {
+        clearTimeout(timer);
+        // 失败后清空 Promise，允许后续请求重试；成功后 sessionToken 已缓存。
+        sessionPromise = null;
+      });
+  }
+  return sessionPromise;
+}
+
 export class ApiError extends Error {
   constructor(code, message, status = 0) {
     super(message);
@@ -20,7 +55,8 @@ function abortError() {
   return new ApiError('ABORTED', '请求已取消', 0);
 }
 
-export async function request(path, { signal, timeout = DEFAULT_TIMEOUT } = {}) {
+export async function request(path, { signal, timeout = DEFAULT_TIMEOUT, method = 'GET', body } = {}) {
+  const token = await ensureSession();
   const controller = new AbortController();
   let timedOut = false;
   const timer = setTimeout(() => {
@@ -37,10 +73,14 @@ export async function request(path, { signal, timeout = DEFAULT_TIMEOUT } = {}) 
   }
 
   try {
-    const response = await fetch(path, {
-      signal: controller.signal,
-      headers: { accept: 'application/json' },
-    });
+    const headers = { accept: 'application/json' };
+    if (token) headers['X-PureTone-Token'] = token;
+    const init = { method, signal: controller.signal, headers };
+    if (body !== undefined) {
+      headers['content-type'] = 'application/json';
+      init.body = typeof body === 'string' ? body : JSON.stringify(body);
+    }
+    const response = await fetch(path, init);
     let payload = null;
     try {
       payload = await response.json();
@@ -176,6 +216,19 @@ export function getLoginStatus() {
   return request('/api/login/status', { timeout: 8000 });
 }
 
+// 缓存同一个 Promise，避免 login.js 与 nav.js 各发一次状态请求。
+let loginStatusPromise = null;
+export function getLoginStatusOnce() {
+  if (!loginStatusPromise) {
+    loginStatusPromise = getLoginStatus().catch((error) => {
+      // 失败后清缓存，允许后续调用重试；成功结果一直复用。
+      loginStatusPromise = null;
+      throw error;
+    });
+  }
+  return loginStatusPromise;
+}
+
 export function getUser() {
   return request('/api/user', { timeout: 10000 });
 }
@@ -189,7 +242,7 @@ export function checkLoginQr(key) {
 }
 
 export function logoutServer() {
-  return request('/api/logout', { timeout: 8000 });
+  return request('/api/logout', { method: 'POST', timeout: 8000 });
 }
 
 async function dedupe(key, factory) {

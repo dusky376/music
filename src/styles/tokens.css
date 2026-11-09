@@ -8,7 +8,7 @@
   --bg-soft-strong: rgba(0, 0, 0, 0.075);
   --text-main: #1d1d1f;
   --text-sub: #5f5f66;
-  --text-muted: #75757c;
+  --text-muted: #5c5c65;
   --accent: #f3253f;
   --accent-deep: #d9142d;
   --accent-soft: rgba(243, 37, 63, 0.09);
@@ -31,8 +31,14 @@
   --radius-md: 13px;
   --radius-lg: 20px;
   --radius-xl: 28px;
-  --spring: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease: cubic-bezier(0.2, 0.75, 0.25, 1);
+  /* 统一的时长 / 缓动档位：主要交互一律用变量，避免散落的字面量 */
+  --dur-fast: 140ms;
+  --dur-normal: 200ms;
+  --dur-slow: 400ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  /* --spring 为历史别称，保留以兼容既有大量引用 */
+  --spring: var(--ease-spring);
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "PingFang SC",
     "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
 }

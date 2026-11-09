@@ -1,6 +1,6 @@
 {
-  "desc": "PureTone 小程序客户端（复用本地后端 /api/*）",
-  "appid": "touristappid",
+  "desc": "PureTone 小程序客户端（兼容保留；请用项目根目录 E:/workspace/music 导入，不要单独导入本目录）",
+  "appid": "wx6a6b62ccc393fd87",
   "compileType": "miniprogram",
   "projectname": "puretone-miniprogram",
   "setting": {

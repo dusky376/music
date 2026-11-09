@@ -23,6 +23,7 @@ let requestToken = 0;
 let activeQuery = '';
 let composing = false;
 let scrollBeforeSearch = 0;
+let lastTracks = [];
 
 const savedHistory = loadJSON(HISTORY_KEY, []);
 let historyList = Array.isArray(savedHistory)
@@ -137,7 +138,25 @@ function abortSearch() {
 
 function setHeader(query) {
   if (heroTitle) heroTitle.textContent = '搜索结果';
-  if (heroSubtitle) heroSubtitle.textContent = `“${query}” · 歌曲 / 歌手 / 专辑`;
+  // 后端只支持 type:1 单曲搜索，文案如实说明，不再宣传专辑。
+  if (heroSubtitle) heroSubtitle.textContent = `“${query}” · 搜索歌曲 / 歌手名或歌名`;
+}
+
+/** 用最近一次搜索结果渲染列表，缓存结果供切换筛选时重渲染。 */
+function renderResults(tracks) {
+  lastTracks = Array.isArray(tracks) ? tracks : [];
+  store.playlist = lastTracks.slice();
+  if (!lastTracks.length) {
+    showEmpty('没有找到相关歌曲', '试试更短的关键词、歌手名或歌名，或者检查有没有错别字。', {
+      label: '换个关键词',
+      onClick: () => {
+        input?.focus();
+        input?.select();
+      },
+    });
+    return;
+  }
+  renderTracklist(lastTracks);
 }
 
 async function runSearch(query) {
@@ -160,19 +179,7 @@ async function runSearch(query) {
   try {
     const data = await searchTracks(keyword, { signal: controller.signal });
     if (token !== requestToken) return;
-    const tracks = data.tracks || [];
-    store.playlist = tracks;
-    if (!tracks.length) {
-      showEmpty('没有找到相关歌曲', '试试更短的关键词、歌手名，或者检查有没有错别字。', {
-        label: '换个关键词',
-        onClick: () => {
-          input?.focus();
-          input?.select();
-        },
-      });
-    } else {
-      renderTracklist(tracks);
-    }
+    renderResults(data.tracks || []);
   } catch (error) {
     if (token !== requestToken || error?.code === 'ABORTED') return;
     showError(error.message || '搜索失败', () => runSearch(keyword));
@@ -204,6 +211,17 @@ function onInput() {
     return;
   }
   scheduleSearch();
+}
+
+/** 是否停留在搜索结果视图（activeQuery 非空即为搜索态）。 */
+export function isSearchActive() {
+  return Boolean(activeQuery);
+}
+
+/** 切换筛选时只重渲染搜索结果：保留关键词与输入框内容，不退出搜索态。 */
+export function rerenderSearch() {
+  setHeader(activeQuery);
+  renderResults(lastTracks);
 }
 
 export function initSearch() {

@@ -23,10 +23,14 @@ function lyricOffsetFor(lines, idx) {
 }
 
 const ERROR_TEXT = {
-  login_required: 'VIP/付费歌曲，登录后才能播放',
+  login_required: 'VIP/付费歌曲，请先在网页版扫码登录',
   vip_required: '当前账号只能试听',
   no_copyright: '这首歌暂无版权音源',
-  risk_control: '登录状态已失效',
+  risk_control: '账号触发风控，请稍后再试',
+  upstream_error: '上游音乐服务暂时不可用，稍后再试',
+  no_audio: '这首歌暂无可用音源',
+  network: '网络有点慢，请检查与电脑的 WiFi 连接',
+  session: '会话初始化失败，请确认后端已启动并开启 EXPOSE_LAN=1',
   none_playable: '队列里没有可播放的歌',
   consecutive_failed: '连续失败已停止播放',
   NETWORK: '网络有点慢，歌曲没有加载出来',
@@ -60,6 +64,11 @@ Page({
     } catch (error) {
       this._winWidth = 375;
     }
+    // 进度条拖动防抖状态（见 handleAudioTime / 滑动四函数）
+    this._lastInt = -1;      // 上次已渲染的整数秒
+    this._lastDurInt = -1;   // 上次已渲染的整数时长
+    this._scrubValue = null; // 最近一次 bindchanging 报告的拖动位置
+
     // 订阅制：页面常驻 app 事件总线，onUnload 统一退订。
     // 事件名登记进 _subscribed 后，app._emit 的旧当前页兜底推送会对本页关闭，避免重复。
     this._subscribed = new Set(['time', 'status', 'track', 'error']);
@@ -131,7 +140,25 @@ Page({
 
   handleAudioTrack({ track, index }) {
     this.scrubbing = false;
-    const patch = { track, lyricLines: [], lyricActive: -1, lyricError: '', lyricOffset: 0, audioLoading: true };
+    // 切歌即用列表里的 track.duration 兜底总时长：/api/audio 无 Content-Length，
+    // onTimeUpdate 可能长时间给 0，进度条 max 不能是 0（否则拖不动）。
+    const dur = Number(track && track.duration) || 1;
+    const app = getApp();
+    // 重置整秒节流基准，保证新曲第一次 time 事件一定能刷新
+    this._lastInt = -1;
+    this._lastDurInt = -1;
+    const patch = {
+      track,
+      current: 0,
+      duration: dur,
+      currText: '0:00',
+      durText: app.fmt(dur),
+      lyricLines: [],
+      lyricActive: -1,
+      lyricError: '',
+      lyricOffset: 0,
+      audioLoading: true,
+    };
     if (typeof index === 'number') patch.queueIndex = index;
     this.setData(patch);
     // 歌词卡 flex 高度随屏渲染：完成后按实测高度重定位
@@ -145,22 +172,29 @@ Page({
   },
 
   handleAudioTime({ current, duration }) {
-    // 拖动中锁住进度条与时间文本，防止 time 事件和 bindchanging 打架回跳。
+    // 拖动/跳播期间锁住进度条，防止 time 事件把手势打回去（slider"拖不动"的根源之一）。
     if (this.scrubbing) return;
+    const activeIdx = lyricIndexAt(this.data.lyricLines, current);
+    // 节流：进度条 value 的 setData 降到"整秒或换行"粒度。
+    // 高频 setData 会让 slider 持续受控重渲染，在部分设备上直接打断原生拖动手势。
+    const intCurrent = Math.floor(current || 0);
+    const intDuration = Math.floor(duration || 0);
+    const lineChanged = activeIdx !== this.data.lyricActive;
+    const tickChanged = intCurrent !== this._lastInt || intDuration !== this._lastDurInt;
+    if (!lineChanged && !tickChanged) return;
+    this._lastInt = intCurrent;
+    this._lastDurInt = intDuration;
     const app = getApp();
     const freeze = Date.now() < (this._lyricFreezeUntil || 0); // 手滑翻看期间，自动跟随让位
-    const activeIdx = lyricIndexAt(this.data.lyricLines, current);
     const patch = {
       current,
       duration: duration || this.data.duration,
       currText: app.fmt(current),
       durText: app.fmt(duration),
     };
-    if (!freeze) {
-      if (activeIdx !== this.data.lyricActive) {
-        patch.lyricActive = activeIdx;
-        patch.lyricOffset = lyricOffsetFor(this.data.lyricLines.length, activeIdx);
-      }
+    if (!freeze && lineChanged) {
+      patch.lyricActive = activeIdx;
+      patch.lyricOffset = lyricOffsetFor(this.data.lyricLines.length, activeIdx);
     }
     this.setData(patch);
   },
@@ -168,8 +202,13 @@ Page({
   handleAudioError(err) {
     const reason = err && (err.reason || err.code);
     const track = err.track || this.data.track;
+    // 优先用 api 层给出的精确 message（区分 upstream_error / risk_control / 403 等），
+    // 否则按 reason 查表，最后才用兜底文案。
+    const msg = (err && err.message)
+      || ERROR_TEXT[reason]
+      || `《${(track && track.name) || '这首歌'}》暂时无法播放`;
     wx.showToast({
-      title: ERROR_TEXT[reason] || `《${(track && track.name) || '这首歌'}》暂时无法播放`,
+      title: msg,
       icon: 'none',
       duration: 2200,
     });
@@ -207,23 +246,49 @@ Page({
     getApp().playNext(false);
   },
 
-  onSeek(e) {
-    const app = getApp();
-    this.scrubbing = false;
-    // 松手位置比拖动过程更准，直接以此为准。
-    const idx = lyricIndexAt(this.data.lyricLines, e.detail.value);
-    this.setData({
-      current: e.detail.value,
-      lyricActive: idx,
-      lyricOffset: lyricOffsetFor(this.data.lyricLines.length, idx),
-    });
-    app.seek(e.detail.value);
+  // —— 进度条拖动 ——
+  // slider 有三个已知失效层，任何一层失灵都表现为"进度条不能拖动"：
+  //   1) bindchanging 首帧前有时间差：触摸瞬间 time 事件就可能回跳 → touchstart 即上锁；
+  //   2) value 高频受控重渲染会打断原生拖动手势 → time 事件节流（见 handleAudioTime）；
+  //   3) 部分真机吞掉 bindchange，scrubbing 永久为 true → touchend 后 100ms 兜底提交（自愈）。
+
+  onSliderTouchStart() {
+    this.scrubbing = true;
   },
 
   onSliderChanging(e) {
-    // 表示拖动开始/进行中， time 事件不再覆盖进度。
     this.scrubbing = true;
+    this._scrubValue = e.detail.value;
     this.setData({ current: e.detail.value });
+  },
+
+  onSliderTouchEnd() {
+    clearTimeout(this._scrubRelease);
+    // 正常路径：bindchange 会紧随其后触发 onSeek（并清掉本定时器）。
+    // 如果 change 被吞（个别真机），按最后拖到位置兜底提交，否则进度永远弹回、等于拖不动。
+    this._scrubRelease = setTimeout(() => {
+      if (this.scrubbing && this._scrubValue != null) this.commitSeek(this._scrubValue);
+    }, 100);
+  },
+
+  onSeek(e) {
+    clearTimeout(this._scrubRelease);
+    // 松手位置比拖动过程更准，直接以此为准。
+    this.commitSeek(e.detail.value);
+  },
+
+  /** 统一的 seek 提交：解锁 + 更新歌词高亮 + 通知 app。 */
+  commitSeek(value) {
+    this.scrubbing = false;
+    this._scrubValue = null;
+    const app = getApp();
+    const idx = lyricIndexAt(this.data.lyricLines, value);
+    this.setData({
+      current: value,
+      lyricActive: idx,
+      lyricOffset: lyricOffsetFor(this.data.lyricLines.length, idx),
+    });
+    app.seek(value);
   },
 
   // —— 播放模式（顺序/随机） ——

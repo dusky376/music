@@ -1,6 +1,6 @@
 import { getTrackUrl } from './api.js';
 import { emit } from './bus.js';
-import { addToHistory, saveSettings, store } from './state.js';
+import { addToHistory, playableTracks, saveSettings, store } from './state.js';
 import { cleanTrack, KEYS, loadJSON, saveJSON } from './storage.js';
 
 const audio = document.getElementById('audioElement');
@@ -155,10 +155,13 @@ function markUnavailable(track) {
 }
 
 function failureMessage(error, track) {
-  if (error?.reason === 'login_required') return 'VIP / 付费歌曲，登录后才能播放';
-  if (error?.reason === 'vip_required') return '当前账号只能试听，暂时无法完整播放';
-  if (error?.reason === 'no_copyright') return '这首歌暂无版权或音源';
-  if (error?.reason === 'risk_control') return '登录状态已失效，请重新登录';
+  const reason = error?.reason;
+  if (reason === 'login_required') return 'VIP / 付费歌曲，登录后才能播放';
+  if (reason === 'vip_required') return '当前账号只能试听，暂时无法完整播放';
+  if (reason === 'no_copyright') return '这首歌暂无版权或音源';
+  if (reason === 'risk_control') return '账号触发风控，请稍后再试或重新登录';
+  if (reason === 'upstream_error') return '音乐服务暂时不可用，稍后自动重试';
+  if (reason === 'network') return '网络异常，音乐服务没有连上，稍后重试';
   if (error?.code === 'TIMEOUT' || error?.code === 'NETWORK') return '网络有点慢，歌曲没有加载出来';
   return error?.message || `《${track?.name || '这首歌'}》暂时无法播放`;
 }
@@ -312,8 +315,10 @@ export function playAll(tracks) {
 
 export function toggle() {
   if (!store.currentTrack) {
-    if (store.playlist.length) return playAll(store.playlist);
-    toast('先选一首歌吧');
+    // 空态起播同样遵守「只看可播放」，不能绕过界面筛掉隐藏的 VIP 歌。
+    const list = playableTracks(store.playlist);
+    if (list.length) return playAll(list);
+    toast(store.filterPlayable ? '筛选后没有可播放的歌曲' : '先选一首歌吧');
     return;
   }
   if (store.status === 'error') {
@@ -573,7 +578,7 @@ export function init() {
   audio.addEventListener('volumechange', () => {
     store.volume = audio.volume;
     store.muted = audio.muted;
-    saveSettings();
+    // 持久化交给 setVolume 的 350ms 防抖与 toggleMute 的即时写盘，这里不再重复写。
     emit('player:volume', { volume: audio.volume, muted: audio.muted });
   });
 

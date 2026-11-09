@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="description" content="PureTone 是一个原生、轻量、可离线缓存的极简音乐播放器。" />
-  <meta name="theme-color" content="#f5f5f7" />
+  <meta name="theme-color" content="#f3f3f5" />
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="apple-touch-icon" href="/assets/pwa.svg" />
   <meta name="mobile-web-app-capable" content="yes" />
@@ -91,7 +91,7 @@
     <div class="search-capsule" id="searchCapsule">
       <div class="search-inner">
         <svg class="icon search-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
-        <input type="search" id="searchInput" class="search-field" placeholder="搜索歌曲、歌手、专辑" autocomplete="off" spellcheck="false" aria-label="搜索歌曲、歌手、专辑" aria-expanded="false" aria-controls="searchHistoryPanel" />
+        <input type="search" id="searchInput" class="search-field" placeholder="搜索歌曲、歌手名或歌名" autocomplete="off" spellcheck="false" aria-label="搜索歌曲、歌手名或歌名" aria-expanded="false" aria-controls="searchHistoryPanel" />
         <button class="search-clear-btn" id="searchClearBtn" type="button" aria-label="清除搜索">✕</button>
       </div>
       <div class="search-history-panel" id="searchHistoryPanel" role="listbox" aria-label="搜索历史" hidden></div>
@@ -188,6 +188,8 @@
     </aside>
 
     <main class="viewport-panel" id="viewportPanel">
+      <!-- 独立的读屏状态摘要：替代整表 aria-live，由 tracklist.js 写简短文本 -->
+      <p class="sr-only" id="tracklistStatus" role="status" aria-live="polite"></p>
       <section class="hero-banner" aria-labelledby="heroTitle">
         <div class="hero-copy">
           <span class="eyebrow">CURATED FOR YOU</span>
@@ -208,16 +210,18 @@
 
       <!-- ARIA table 结构：display:contents 不产生盒子，不影响 sticky 头部与既有布局 -->
       <div class="track-grid-table" role="table" aria-label="歌曲列表">
-        <div class="track-grid-header" role="row">
-          <div role="columnheader" aria-label="序号">#</div>
-          <div role="columnheader" aria-label="封面"></div>
-          <div role="columnheader">歌曲标题</div>
-          <div role="columnheader">歌手</div>
-          <div role="columnheader">专辑</div>
-          <div role="columnheader" class="align-right">时长</div>
+        <div class="track-grid-header-group" role="rowgroup">
+          <div class="track-grid-header" role="row">
+            <div role="columnheader" aria-label="序号">#</div>
+            <div role="columnheader" aria-label="封面"></div>
+            <div role="columnheader">歌曲标题</div>
+            <div role="columnheader">歌手</div>
+            <div role="columnheader">专辑</div>
+            <div role="columnheader" class="align-right">时长</div>
+          </div>
         </div>
 
-        <div class="track-grid-body" id="trackGridBody" role="rowgroup" aria-live="polite"></div>
+        <div class="track-grid-body" id="trackGridBody" role="rowgroup"></div>
       </div>
     </main>
   </div>
@@ -243,7 +247,8 @@
           <svg class="icon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
         </button>
         <button class="round-btn-main" id="playBtn" type="button" aria-label="播放">
-          <svg class="icon" id="playIconSvg" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5v14l11-7z"/></svg>
+          <svg class="icon play-glyph" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5v14l11-7z"/></svg>
+          <svg class="icon pause-glyph" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
         </button>
         <button class="round-btn" id="nextBtn" type="button" title="下一首" aria-label="下一首">
           <svg class="icon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M16 6h2v12h-2zM4 18l8.5-6L4 6z"/></svg>
@@ -256,7 +261,8 @@
         <span class="timeline-label" id="currTime">0:00</span>
         <div class="fluid-progress" id="progressTrack" role="slider" aria-label="播放进度" aria-valuemin="0" aria-valuemax="100" tabindex="0">
           <div class="progress-tooltip" id="progressTooltip">0:00</div>
-          <div class="fluid-progress-bar" id="progressBar"><div class="fluid-progress-thumb"></div></div>
+          <div class="fluid-progress-bar" id="progressBar"></div>
+          <div class="fluid-progress-thumb"></div>
         </div>
         <span class="timeline-label" id="durTime">0:00</span>
       </div>
@@ -264,7 +270,7 @@
 
     <div class="dock-utilities">
       <button class="round-btn" id="qualityBtn" type="button" title="音质选择" aria-label="音质选择" aria-haspopup="menu" aria-expanded="false">
-        <svg class="icon" viewBox="0 0 24 24"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3z"/></svg>
+        <svg class="icon" viewBox="0 0 24 24"><line x1="5" y1="20" x2="5" y2="13"/><line x1="10" y1="20" x2="10" y2="9"/><line x1="15" y1="20" x2="15" y2="5"/><line x1="20" y1="20" x2="20" y2="10"/></svg>
       </button>
       <div class="quality-menu" id="qualityMenu" role="menu" aria-label="音质" hidden>
         <button class="quality-item" type="button" role="menuitemradio" data-quality="standard">标准 128k</button>
@@ -275,7 +281,7 @@
         <svg class="icon" viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
       </button>
       <button class="round-btn" id="dockLyricBtn" type="button" title="全屏歌词" aria-label="全屏歌词">
-        <svg class="icon" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="13" y2="12"/></svg>
+        <svg class="icon" viewBox="0 0 24 24"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="11" x2="16" y2="11"/><line x1="4" y1="16" x2="18" y2="16"/><line x1="4" y1="21" x2="12" y2="21"/></svg>
       </button>
       <button class="round-btn" id="muteBtn" type="button" title="静音" aria-label="静音" aria-pressed="false">
         <svg class="icon" viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
@@ -289,6 +295,7 @@
   </footer>
 
   <section class="immersive-display" id="immersiveDisplay" aria-hidden="true" aria-label="沉浸式歌词与评论" role="dialog" aria-modal="true">
+    <!-- #fluidCanvas 是纯 CSS 渐变层（div，非 <canvas>），ambient.js 只写入 --ambient-* 变量 -->
     <div class="fluid-ambient-canvas" id="fluidCanvas" aria-hidden="true"></div>
     <div class="ambient-white-mask" aria-hidden="true"></div>
 
@@ -297,9 +304,9 @@
         <svg class="icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
       <div class="modal-switcher" role="tablist" aria-label="沉浸式页面内容">
-        <button class="switcher-btn active" id="switchLyricsBtn" type="button" role="tab" aria-selected="true">实时歌词</button>
-        <button class="switcher-btn" id="switchCommentsBtn" type="button" role="tab" aria-selected="false">热门评论</button>
-        <button class="switcher-btn" id="switchSimilarBtn" type="button" role="tab" aria-selected="false">相似歌曲</button>
+        <button class="switcher-btn active" id="switchLyricsBtn" type="button" role="tab" aria-selected="true" aria-controls="lyricsViewport" tabindex="0">实时歌词</button>
+        <button class="switcher-btn" id="switchCommentsBtn" type="button" role="tab" aria-selected="false" aria-controls="commentsStream" tabindex="-1">热门评论</button>
+        <button class="switcher-btn" id="switchSimilarBtn" type="button" role="tab" aria-selected="false" aria-controls="similarStream" tabindex="-1">相似歌曲</button>
       </div>
       <div class="modal-nav-spacer" aria-hidden="true"></div>
     </div>
@@ -316,7 +323,7 @@
       </div>
 
       <div class="stage-right">
-        <div class="lyrics-stream-viewport" id="lyricsViewport">
+        <div class="lyrics-stream-viewport" id="lyricsViewport" role="tabpanel" aria-labelledby="switchLyricsBtn" tabindex="0">
           <div class="lyrics-track" id="lyricsTrack">
             <div class="lyrics-state">
               <div class="lyrics-state-icon">♪</div>
@@ -325,13 +332,13 @@
             </div>
           </div>
         </div>
-        <div class="comments-stream" id="commentsStream" hidden>
+        <div class="comments-stream" id="commentsStream" role="tabpanel" aria-labelledby="switchCommentsBtn" tabindex="0" hidden>
           <div class="comments-state">
             <div class="comments-state-icon">“</div>
             <h3>还没有播放歌曲</h3>
           </div>
         </div>
-        <div class="similar-stream" id="similarStream" hidden>
+        <div class="similar-stream" id="similarStream" role="tabpanel" aria-labelledby="switchSimilarBtn" tabindex="0" hidden>
           <div class="comments-state">
             <div class="comments-state-icon">≋</div>
             <h3>还没有播放歌曲</h3>
@@ -345,7 +352,8 @@
         <span class="timeline-label" id="modalCurrTime">0:00</span>
         <div class="fluid-progress" id="modalProgressTrack" role="slider" aria-label="播放进度" aria-valuemin="0" aria-valuemax="100" tabindex="0">
           <div class="progress-tooltip" id="modalProgressTooltip">0:00</div>
-          <div class="fluid-progress-bar" id="modalProgressBar"><div class="fluid-progress-thumb"></div></div>
+          <div class="fluid-progress-bar" id="modalProgressBar"></div>
+          <div class="fluid-progress-thumb"></div>
         </div>
         <span class="timeline-label" id="modalDurTime">0:00</span>
       </div>
@@ -354,7 +362,8 @@
           <svg class="icon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
         </button>
         <button class="modal-play-btn" id="modalPlayBtn" type="button" aria-label="播放">
-          <svg class="icon" id="modalPlaySvg" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5v14l11-7z"/></svg>
+          <svg class="icon play-glyph" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5v14l11-7z"/></svg>
+          <svg class="icon pause-glyph" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
         </button>
         <button class="round-btn" id="modalNextBtn" type="button" aria-label="下一首">
           <svg class="icon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M16 6h2v12h-2zM4 18l8.5-6L4 6z"/></svg>

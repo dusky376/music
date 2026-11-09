@@ -3,7 +3,18 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import { COOKIE, HOST, PORT, ROOT, UPSTREAM, WARM } from './config.js';
+import {
+  COOKIE,
+  EXPOSE_LAN,
+  EXTRA_ORIGINS,
+  HOST,
+  LAN_IP,
+  LEVELS,
+  PORT,
+  ROOT,
+  UPSTREAM,
+  WARM,
+} from './config.js';
 import {
   ApiError,
   getComments,
@@ -22,6 +33,13 @@ import {
   stats,
   warmSections,
 } from './netease.js';
+import {
+  GuardError,
+  SECURITY_HEADERS,
+  SESSION_TOKEN,
+  createRateLimiter,
+  createRequestGuard,
+} from './security.js';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -39,12 +57,46 @@ const MIME = {
   '.woff2': 'font/woff2',
 };
 
-const SECURITY_HEADERS = {
-  'X-Content-Type-Options': 'nosniff',
-  'Referrer-Policy': 'no-referrer',
-  'Content-Security-Policy':
-    "default-src 'self'; img-src 'self' https: data:; media-src 'self' https: http:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'",
-};
+const guard = createRequestGuard({
+  port: PORT,
+  lanIp: EXPOSE_LAN ? LAN_IP : null,
+  extraOrigins: EXTRA_ORIGINS,
+});
+
+// 敏感接口：改状态、读账号资料、消耗上游登录配额，一律要求会话令牌。
+const TOKEN_REQUIRED = new Set([
+  '/api/login/qr',
+  '/api/login/qr/check',
+  '/api/logout',
+  '/api/user',
+]);
+
+const qrCreateLimiter = createRateLimiter({ limit: 5, windowMs: 60_000, message: '二维码创建过于频繁，请一分钟后再试' });
+const qrCheckLimiter = createRateLimiter({ limit: 90, windowMs: 60_000, message: '二维码轮询过于频繁，请稍后再试' });
+const writeLimiter = createRateLimiter({ limit: 12, windowMs: 60_000, message: '操作过于频繁，请稍后再试' });
+
+// 只有本进程创建过的二维码 key 才能被轮询，挡住「拿任意 key 反复打上游」。
+const qrSessions = new Map();
+function rememberQrKey(key) {
+  if (!key) return;
+  qrSessions.set(String(key), Date.now());
+  if (qrSessions.size > 200) {
+    const cutoff = Date.now() - 10 * 60 * 1000;
+    for (const [k, at] of qrSessions) if (at < cutoff) qrSessions.delete(k);
+  }
+}
+
+function clientKey(req) {
+  return String(req.socket?.remoteAddress || 'unknown');
+}
+
+function decodeParam(raw) {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    throw new GuardError('BAD_PARAM', '参数编码不合法', 400);
+  }
+}
 
 function sendJSON(res, status, payload, extra = {}) {
   const body = JSON.stringify(payload);
@@ -96,14 +148,23 @@ async function serveStatic(req, res, pathname) {
     sendJSON(res, 403, { error: { code: 'FORBIDDEN', message: '禁止访问' } });
     return;
   }
+  // 白名单只放行源码与静态资源；即便 /src/ 下出现凭据/数据文件也不外发。
+  const ext = path.extname(filePath).toLowerCase();
+  if (pathname.startsWith('/src/') && !(ext in MIME)) {
+    sendJSON(res, 404, { error: { code: 'NOT_FOUND', message: '资源不存在' } });
+    return;
+  }
+  if (!(ext in MIME)) {
+    sendJSON(res, 404, { error: { code: 'NOT_FOUND', message: '资源不存在' } });
+    return;
+  }
 
   try {
     const stat = await fsp.stat(filePath);
     if (!stat.isFile()) throw new Error('not a file');
-    const ext = path.extname(filePath).toLowerCase();
     res.writeHead(200, {
       ...SECURITY_HEADERS,
-      'Content-Type': MIME[ext] || 'application/octet-stream',
+      'Content-Type': MIME[ext],
       'Content-Length': stat.size,
       'Cache-Control': 'no-cache',
     });
@@ -121,19 +182,44 @@ async function serveStatic(req, res, pathname) {
   }
 }
 
+function parseTrackParams(url) {
+  const level = url.searchParams.get('level') || 'standard';
+  if (!LEVELS.includes(level)) {
+    throw new GuardError('BAD_LEVEL', '音质参数不合法', 400);
+  }
+  const feeRaw = url.searchParams.get('fee');
+  const fee = feeRaw === null ? 0 : Number(feeRaw);
+  if (feeRaw !== null && (!Number.isInteger(fee) || fee < 0 || fee > 16)) {
+    throw new GuardError('BAD_FEE', 'fee 参数不合法', 400);
+  }
+  return { level, fee };
+}
+
 async function handleApi(req, res, url) {
   const pathname = url.pathname;
   const started = Date.now();
 
   try {
+    if (TOKEN_REQUIRED.has(pathname)) guard.assertToken(req);
+
+    if (pathname === '/api/session' && req.method === 'GET') {
+      sendJSON(res, 200, {
+        token: SESSION_TOKEN,
+        exposeLan: EXPOSE_LAN,
+        lanUrl: EXPOSE_LAN && LAN_IP ? `http://${LAN_IP}:${PORT}` : null,
+      });
+      return;
+    }
+
     if (pathname === '/api/health') {
       sendJSON(res, 200, {
         ok: true,
         upstream: UPSTREAM,
-        cookie: Boolean(COOKIE),
+        envCookie: Boolean(COOKIE),
         login: loginState(),
         cache: stats(),
         uptime: Math.round(process.uptime()),
+        exposeLan: EXPOSE_LAN,
       });
       return;
     }
@@ -145,22 +231,29 @@ async function handleApi(req, res, url) {
 
     let match = pathname.match(/^\/api\/section\/(.+)$/);
     if (match && req.method === 'GET') {
-      const data = await getSection(decodeURIComponent(match[1]));
-      sendJSON(res, 200, data);
+      const key = decodeParam(match[1]);
+      if (!/^[\w\u4e00-\u9fa5-]{1,48}$/.test(key)) {
+        throw new GuardError('BAD_SECTION', '板块参数不合法', 400);
+      }
+      sendJSON(res, 200, await getSection(key));
       return;
     }
 
     if (pathname === '/api/search' && req.method === 'GET') {
       const keyword = url.searchParams.get('q') || '';
-      const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit')) || 60));
+      const limitRaw = url.searchParams.get('limit');
+      const limit = limitRaw === null ? 60 : Number(limitRaw);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+        throw new GuardError('BAD_LIMIT', 'limit 参数不合法', 400);
+      }
+      // searchParams.get 已经解码过一次，不要二次 decodeURIComponent（会破坏含 % 的关键词）。
       sendJSON(res, 200, await search(keyword, limit));
       return;
     }
 
     match = pathname.match(/^\/api\/track\/(\d+)\/url$/);
     if (match && req.method === 'GET') {
-      const fee = Number(url.searchParams.get('fee')) || 0;
-      const level = url.searchParams.get('level') || 'standard';
+      const { fee, level } = parseTrackParams(url);
       sendJSON(res, 200, await getTrackUrl(match[1], { fee, level }));
       return;
     }
@@ -173,7 +266,11 @@ async function handleApi(req, res, url) {
 
     match = pathname.match(/^\/api\/track\/(\d+)\/comments$/);
     if (match && req.method === 'GET') {
-      const limit = Math.min(50, Math.max(1, Number(url.searchParams.get('limit')) || 20));
+      const limitRaw = url.searchParams.get('limit');
+      const limit = limitRaw === null ? 20 : Number(limitRaw);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
+        throw new GuardError('BAD_LIMIT', 'limit 参数不合法', 400);
+      }
       sendJSON(res, 200, await getComments(match[1], limit));
       return;
     }
@@ -186,29 +283,44 @@ async function handleApi(req, res, url) {
 
     match = pathname.match(/^\/api\/audio\/(\d+)$/);
     if (match && (req.method === 'GET' || req.method === 'HEAD')) {
-      await proxyAudio(match[1], req, res);
+      const level = url.searchParams.get('level') || 'standard';
+      if (!LEVELS.includes(level)) {
+        throw new GuardError('BAD_LEVEL', '音质参数不合法', 400);
+      }
+      await proxyAudio(match[1], req, res, { level });
       return;
     }
 
-    // —— 扫码登录（仅本机使用，cookie 只存内存 + 本地文件）——
+    // —— 扫码登录（仅本机使用，cookie 只存本机文件）——
     if (pathname === '/api/login/status' && req.method === 'GET') {
       sendJSON(res, 200, loginState());
       return;
     }
     if (pathname === '/api/login/qr' && req.method === 'GET') {
-      sendJSON(res, 200, await loginQrCreate());
+      qrCreateLimiter(`${clientKey(req)}:qr:create`);
+      const data = await loginQrCreate();
+      rememberQrKey(data.key);
+      sendJSON(res, 200, data);
       return;
     }
     if (pathname === '/api/login/qr/check' && req.method === 'GET') {
+      qrCheckLimiter(`${clientKey(req)}:qr:check`);
       const key = url.searchParams.get('key') || '';
-      sendJSON(res, 200, await loginQrCheck(key));
+      if (!qrSessions.has(key)) {
+        throw new GuardError('BAD_KEY', '二维码会话不存在或已过期，请刷新二维码', 400);
+      }
+      const data = await loginQrCheck(key);
+      if (data?.status === 'success' || data?.status === 'expired') qrSessions.delete(key);
+      sendJSON(res, 200, data);
       return;
     }
     if (pathname === '/api/logout' && req.method === 'POST') {
-      sendJSON(res, 200, logout());
+      writeLimiter(`${clientKey(req)}:logout`);
+      sendJSON(res, 200, await logout());
       return;
     }
     if (pathname === '/api/user' && req.method === 'GET') {
+      writeLimiter(`${clientKey(req)}:user`);
       sendJSON(res, 200, await getAccountProfile());
       return;
     }
@@ -216,8 +328,10 @@ async function handleApi(req, res, url) {
     sendJSON(res, 404, { error: { code: 'NOT_FOUND', message: '接口不存在' } });
   } catch (error) {
     if (error?.code === 'ERR_STREAM_PREMATURE_CLOSE') return;
+    const known = error instanceof ApiError || error instanceof GuardError;
     console.error(`[api] ${req.method} ${pathname} → ${error.code || error.name}: ${error.message}`);
-    sendError(res, error);
+    // 未知异常不把内部错误串回显给客户端。
+    sendError(res, known ? error : new GuardError('INTERNAL', '服务内部错误，请稍后重试', 502));
   } finally {
     if (!pathname.startsWith('/api/audio/')) {
       const ms = Date.now() - started;
@@ -226,20 +340,14 @@ async function handleApi(req, res, url) {
   }
 }
 
-// 双绑定：127.0.0.1（桌面浏览器）+ 本机内网 IPv4（真机预览经局域网访问）。
-// 只绑探测到的那一枚内网 IP，比 0.0.0.0 更收敛；探测失败（没有内网）就只挂 loopback。
-import os from 'node:os';
-
-function lanIPv4() {
-  for (const ifaces of Object.values(os.networkInterfaces())) {
-    for (const iface of ifaces) {
-      if (iface.family === 'IPv4' && !iface.internal) return iface.address;
-    }
-  }
-  return null;
-}
-
 async function handleRequest(req, res) {
+  try {
+    guard.assertRequest(req);
+  } catch (error) {
+    sendJSON(res, error.status || 403, { error: { code: error.code || 'FORBIDDEN', message: error.message } });
+    return;
+  }
+
   let url;
   try {
     url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
@@ -262,6 +370,7 @@ async function handleRequest(req, res) {
 }
 
 const server = http.createServer(handleRequest);
+let lanServer = null;
 
 server.on('error', (error) => {
   if (error.code === 'EADDRINUSE') {
@@ -276,28 +385,38 @@ server.listen(PORT, HOST, () => {
   console.log(`\n  PureTone 已启动：http://${HOST}:${PORT}`);
   console.log(`  上游：${UPSTREAM}`);
   console.log(`  登录态：${COOKIE ? '已配置 NETEASE_COOKIE' : '未配置（匿名模式）'}`);
-  console.log(`  缓存：内存 TTL；预热：${WARM ? '开' : '关'}\n`);
+  console.log(`  缓存：内存 TTL；预热：${WARM ? '开' : '关'}`);
+  console.log(`  局域网访问：${EXPOSE_LAN ? '已开启（仅可在可信内网使用）' : '已禁用'}\n`);
   if (WARM) {
     warmSections().catch((error) => console.error('[warm]', error));
   }
 });
 
-// 真机预览支持：同一个 handler 再挂内网 IPv4（探测到的那一枚），失败不影响主监听。
-const lan = lanIPv4();
-if (lan && lan !== HOST) {
-  const lanServer = http.createServer(handleRequest);
+// 默认只绑回环；小程序真机调试需显式 EXPOSE_LAN=1，避免无鉴权接口默认暴露到局域网。
+if (EXPOSE_LAN && LAN_IP && LAN_IP !== HOST) {
+  lanServer = http.createServer(handleRequest);
   lanServer.on('error', (error) => {
-    console.error(`[lan] ${lan}:${PORT} 绑定失败（真机预览不可用）：${error.code}`);
+    console.error(`[lan] ${LAN_IP}:${PORT} 绑定失败（真机预览不可用）：${error.code}`);
   });
-  lanServer.listen(PORT, lan, () => {
-    console.log(`  真机预览：http://${lan}:${PORT}\n`);
+  lanServer.listen(PORT, LAN_IP, () => {
+    console.log(`  真机预览：http://${LAN_IP}:${PORT}`);
+    console.log('  注意：该地址可被同网段任意设备访问，请勿在公共网络使用。\n');
   });
+} else if (!EXPOSE_LAN) {
+  console.log('  如需小程序真机调试：设置 EXPOSE_LAN=1 后重启服务。\n');
 }
 
+let shuttingDown = false;
 function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
   console.log('\n正在关闭…');
-  server.close(() => process.exit(0));
-  setTimeout(() => process.exit(0), 2000).unref();
+  const done = () => process.exit(0);
+  Promise.all([
+    new Promise((resolve) => server.close(resolve)),
+    lanServer ? new Promise((resolve) => lanServer.close(resolve)) : Promise.resolve(),
+  ]).then(done, done);
+  setTimeout(done, 2000).unref();
 }
 
 process.on('SIGINT', shutdown);

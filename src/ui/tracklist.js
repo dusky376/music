@@ -5,8 +5,19 @@ import { isFavorited, store, toggleFavorite } from '../core/state.js';
 
 const FALLBACK_COVER = '/assets/cover.svg';
 const body = document.getElementById('trackGridBody');
+// 独立的读屏状态摘要（整表不再放在 live region 里）
+const statusEl = document.getElementById('tracklistStatus');
 let tracks = [];
 let retryHandler = null;
+
+function setStatus(text) {
+  if (statusEl) statusEl.textContent = text;
+}
+
+// 搜索页由 search.js 把 heroTitle 设为「搜索结果」，据此给出更贴切的摘要。
+function isSearchView() {
+  return document.getElementById('heroTitle')?.textContent === '搜索结果';
+}
 
 function makeElement(tag, className, text) {
   const el = document.createElement(tag);
@@ -41,6 +52,22 @@ function heartIcon(filled) {
   return svg;
 }
 
+// 不可用歌曲除「变灰」外，补 aria-disabled 与文字标记（非颜色线索）。
+function markUnavailable(row, unavailable) {
+  row.classList.toggle('unavailable', unavailable);
+  if (unavailable) row.setAttribute('aria-disabled', 'true');
+  else row.removeAttribute('aria-disabled');
+  const nameCell = row.querySelector('.col-name');
+  if (!nameCell) return;
+  let marker = nameCell.querySelector('.badge-unavailable');
+  if (unavailable && !marker) {
+    marker = makeElement('span', 'badge badge-unavailable', '不可播');
+    nameCell.appendChild(marker);
+  } else if (!unavailable && marker) {
+    marker.remove();
+  }
+}
+
 function createRow(track, index) {
   const row = makeElement('div', 'track-item');
   row.dataset.trackId = track.id;
@@ -73,6 +100,10 @@ function createRow(track, index) {
     if (art.src.endsWith(FALLBACK_COVER)) return;
     art.src = FALLBACK_COVER;
   });
+  // display:contents 的 cell 包裹层，不改变 grid item 结构
+  const artCell = makeElement('div', 'cell-contents');
+  artCell.setAttribute('role', 'cell');
+  artCell.appendChild(art);
 
   const name = makeElement('div', 'col-name');
   name.setAttribute('role', 'cell');
@@ -97,14 +128,18 @@ function createRow(track, index) {
   } else {
     fav.appendChild(heartIcon(false));
   }
+  const favCell = makeElement('div', 'cell-contents');
+  favCell.setAttribute('role', 'cell');
+  favCell.appendChild(fav);
 
-  row.append(indexCell, art, name, artist, album, duration, fav);
+  row.append(indexCell, artCell, name, artist, album, duration, favCell);
   if (store.currentTrack?.id === track.id) {
     row.classList.add('active');
     if (!store.isPlaying) bars.classList.add('paused');
     row.setAttribute('aria-current', 'true');
   }
-  if (store.unavailable.has(track.id)) row.classList.add('unavailable');
+  // store.unavailable 存的是 String(id)，统一用字符串比较
+  markUnavailable(row, store.unavailable.has(String(track.id)));
   return row;
 }
 
@@ -130,6 +165,7 @@ export function showSkeleton(count = 8) {
   for (let i = 0; i < count; i += 1) wrap.appendChild(makeElement('div', 'skeleton-row'));
   body.appendChild(wrap);
   body.setAttribute('aria-busy', 'true');
+  setStatus('正在加载歌曲…');
 }
 
 export function renderTracklist(nextTracks) {
@@ -138,16 +174,19 @@ export function renderTracklist(nextTracks) {
   body.removeAttribute('aria-busy');
   if (!tracks.length) {
     setStateMessage('♪', '这里暂时没有歌曲', '换一个板块，或者清除搜索后再试。');
+    setStatus('没有可播放的歌曲');
     return;
   }
   const fragment = document.createDocumentFragment();
   for (let i = 0; i < tracks.length; i += 1) fragment.appendChild(createRow(tracks[i], i));
   body.replaceChildren(fragment);
+  setStatus(isSearchView() ? `搜索到 ${tracks.length} 首歌曲` : `已加载 ${tracks.length} 首歌曲`);
 }
 
 export function showEmpty(title, detail, action) {
   tracks = [];
   setStateMessage('♪', title, detail, action);
+  setStatus(title || '没有可播放的歌曲');
 }
 
 export function showError(message, onRetry) {
@@ -168,6 +207,7 @@ export function showError(message, onRetry) {
         }
       : null
   );
+  setStatus('歌曲加载失败，可重新加载');
 }
 
 export function refreshActive() {
@@ -175,7 +215,7 @@ export function refreshActive() {
   for (const row of body.querySelectorAll('.track-item')) {
     const isActive = Boolean(activeId) && row.dataset.trackId === activeId;
     row.classList.toggle('active', isActive);
-    row.classList.toggle('unavailable', store.unavailable.has(row.dataset.trackId));
+    markUnavailable(row, store.unavailable.has(row.dataset.trackId));
     row.toggleAttribute('aria-current', isActive);
     row.querySelector('.sound-bars')?.classList.toggle('paused', !store.isPlaying);
   }

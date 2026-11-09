@@ -16,9 +16,12 @@ Page({
   },
 
   onLoad() {
+    // 板块以服务端 /api/sections 为准（含「新歌榜」）；拉取失败时退回本地兜底列表。
+    this._baseSections = SECTIONS;
     this.loadSection(this.data.activeKey);
     this.syncAccount();
     this.syncNow();
+    this.loadSections();
     // 迷你条跟随全局播放状态：切歌/播放暂停即刻反映
     const app = getApp();
     this._subs = [
@@ -30,6 +33,40 @@ Page({
   onUnload() {
     (this._subs || []).forEach((dispose) => dispose());
     this._subs = [];
+  },
+
+  /**
+   * 每次回到前台都刷新：网页版扫码登录后切回小程序、从播放页返回都能同步，不必冷启动。
+   * （替代旧版 this.__loaded 死代码——该字段全项目无赋值，onShow 永远不执行刷新）
+   * skipAutoNav=true：切回前台只更新登录态 / 板块可见性，不自动跳到「每日推荐」。
+   */
+  onShow() {
+    this.syncAccount(true);
+    this.syncNow();
+  },
+
+  /** 拉取服务端板块清单；成功则以服务端为准，失败静默保留本地兜底，不打断使用。 */
+  loadSections() {
+    api.sections()
+      .then((list) => {
+        if (!list.length) return;
+        this._baseSections = list;
+        if (!list.some((s) => s.key === this.data.activeKey)) {
+          this.setData({ activeKey: list[0].key });
+          this.loadSection(list[0].key);
+        }
+        this.applySections();
+      })
+      .catch(() => {
+        // 后端未实现 /api/sections 或不可达：保留本地兜底 SECTIONS
+      });
+  },
+
+  /** 按登录态把账号板块拼到基础板块前，写回 data.sections。 */
+  applySections(logged) {
+    const base = this._baseSections || SECTIONS;
+    const isLogged = logged === undefined ? this.data.account.logged : logged;
+    this.setData({ sections: isLogged ? [...ACCOUNT_SECTIONS, ...base] : base });
   },
 
   /** 同步迷你播放条：有没有歌在播 + 是否 playing。 */
@@ -48,11 +85,6 @@ Page({
 
   onOpenPlayer() {
     wx.navigateTo({ url: '/pages/player/player' });
-  },
-
-  // 从网页版扫码登录后切回小程序，这里同步一次登录态与账号板块可见性。
-  onShow() {
-    if (this.__loaded) this.syncAccount();
   },
 
   switchSection(e) {
@@ -80,7 +112,7 @@ Page({
       if (err.code === 'HTTP_401') {
         // 账号板块未登录：如实提示，并隐藏账号入口
         wx.showToast({ title: '请先在网页版扫码登录', icon: 'none', duration: 2600 });
-        this.setData({ loading: false, error: '', tracks: [], title: '需要登录', sections: SECTIONS });
+        this.setData({ loading: false, error: '', tracks: [], title: '需要登录', sections: this._baseSections || SECTIONS });
         this.syncAccount();
         return;
       }
@@ -100,28 +132,31 @@ Page({
     });
   },
 
-  /** 同步服务端登录态：登录后有头像昵称与账号板块；退出或未登录则隐藏。 */
-  syncAccount() {
+  /**
+   * 同步服务端登录态：登录后有头像昵称与账号板块；退出或未登录则隐藏。
+   * skipAutoNav=true 时不做「登录成功自动跳每日推荐」（切回前台的被动刷新用）。
+   */
+  syncAccount(skipAutoNav = false) {
     api.user()
       .then((data) => {
         const profile = data?.profile;
         const logged = Boolean(data?.logged && profile);
-        const sections = logged ? [...ACCOUNT_SECTIONS, ...SECTIONS] : SECTIONS;
         this.setData({
           account: {
             logged,
             nickname: logged ? profile.nickname || '已登录' : '',
             avatar: logged ? profile.avatar || '' : '',
           },
-          sections,
         });
+        this.applySections(logged);
+        const base = this._baseSections || SECTIONS;
         if (!logged && ACCOUNT_SECTIONS.some((s) => s.key === this.data.activeKey)) {
-          this.setData({ activeKey: SECTIONS[0].key });
-          this.loadSection(SECTIONS[0].key);
+          this.setData({ activeKey: base[0].key });
+          this.loadSection(base[0].key);
           return;
         }
-        // 登录成功且用户没手动换过页：默认落在"每日推荐"（账号内容在最前面）
-        if (logged && this.data.activeKey === SECTIONS[0].key && !this.userTouched) {
+        // 登录成功且用户没手动换过页、且不是切回前台的被动刷新：默认落在「每日推荐」
+        if (logged && !skipAutoNav && this.data.activeKey === base[0].key && !this.userTouched) {
           this.setData({ activeKey: ACCOUNT_SECTIONS[0].key });
           this.loadSection(ACCOUNT_SECTIONS[0].key);
         }

@@ -2,6 +2,7 @@ import { on } from '../core/bus.js';
 import { formatTime } from '../core/format.js';
 import { move, playAt, removeAt } from '../core/player.js';
 import { store } from '../core/state.js';
+import { activateDialog, deactivateDialog } from './dialog.js';
 import { showToast } from './toast.js';
 
 const panel = document.getElementById('queuePanel');
@@ -110,6 +111,8 @@ export function openQueue() {
   openBtn?.classList.add('active');
   openBtn?.setAttribute('aria-expanded', 'true');
   scrollToActive();
+  // 焦点移入 / Tab 循环 / 底层 inert；点击遮罩需保持可交互以关闭队列
+  activateDialog(panel, { initialFocus: closeBtn, keep: backdrop ? [backdrop] : [] });
 }
 
 export function closeQueue() {
@@ -120,6 +123,7 @@ export function closeQueue() {
   backdrop?.classList.remove('active');
   openBtn?.classList.remove('active');
   openBtn?.setAttribute('aria-expanded', 'false');
+  deactivateDialog(panel);
 }
 
 export function toggleQueue() {

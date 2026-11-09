@@ -1,7 +1,8 @@
 // PureTone 小程序入口：唯一的音频实例常驻 app，跨页面共享。
-// 开发期指向本地后端（需在 DevTools「详情 → 本地设置」勾选"不校验合法域名"）。
-// 上线时把 DEV 里的 127.0.0.1:8787 换成已备案的 https 域名即可。
-const { BASE } = require('./utils/api.js');
+// 后端地址统一来自 config.js（单一来源），不在本文件写死 IP。
+// 当前定位：个人本机自用 / 开源学习作品，尚不具备上线条件，详见 README。
+const { BASE_URL } = require('./config.js');
+const { api, absoluteUrl, ensureSession, getSessionInfo } = require('./utils/api.js');
 
 App({
   _listeners: {},
@@ -15,15 +16,37 @@ App({
   audio: null,
   failStreak: 0,
   playMode: 'order', // order 顺序 | shuffle 随机
+  _useBg: false,     // 是否用 getBackgroundAudioManager
+  _bgBound: false,   // 后台音频单例事件是否已绑定（避免重复 onTimeUpdate）
+  _playTicket: 0,    // 切歌竞态令牌：异步取链返回前又点歌则丢弃过期结果
 
+  /**
+   * 唯一的 onLaunch：先恢复设置 → 再初始化播放器 → 最后预热会话。
+   * （旧版有两个同名 onLaunch，后者覆盖前者，playMode 记忆永不执行）
+   */
   onLaunch() {
-    // 播放模式持久化：下次打开沿用
+    // 1) 先恢复用户设置
     try {
       this.playMode = wx.getStorageSync('playMode') || 'order';
     } catch (error) {
       // 存储不可用时保持默认顺序
     }
+    // 2) 再初始化播放器（单例音频 + 状态机事件 + 来电中断监听）
     this.audio = this._createAudio();
+    this._bindInterruptions();
+    // 3) 最后预热会话令牌；失败明确提示，不静默 403
+    ensureSession()
+      .then(() => {
+        const info = getSessionInfo();
+        // 后端未开 EXPOSE_LAN 却配了内网 IP：真机必连不上，提前告知
+        if (info && info.exposeLan === false && !/127\.0\.0\.1|localhost/.test(BASE_URL)) {
+          wx.showToast({ title: '后端未开启 EXPOSE_LAN=1，真机可能连不上', icon: 'none', duration: 3000 });
+        }
+      })
+      .catch((err) => {
+        wx.showToast({ title: err.message || '会话初始化失败，请检查后端', icon: 'none', duration: 3000 });
+        this._emit('error', err);
+      });
   },
 
   /** 切换顺序/随机并落地持久化，返回新模式。 */
@@ -37,39 +60,104 @@ App({
     return this.playMode;
   },
 
+  /**
+   * 创建 / 复用音频实例，事件只绑定一次。
+   * 优先 wx.getBackgroundAudioManager()（支持后台 / 锁屏 / 线控）；
+   * 平台不支持时降级 wx.createInnerAudioContext()（切后台即停）。
+   * getBackgroundAudioManager 是全局单例，不能重建、不能重复绑事件。
+   */
   _createAudio() {
+    const useBg = typeof wx.getBackgroundAudioManager === 'function';
+    this._useBg = useBg;
+    if (useBg) {
+      if (!this.audio) this.audio = wx.getBackgroundAudioManager();
+      if (!this._bgBound) {
+        this._bindAudioEvents(this.audio);
+        this._bgBound = true;
+      }
+      return this.audio;
+    }
+    // 降级 innerAudioContext：每次换源重建，规避「换 src 继承上一首播放位置」
+    if (this.audio) {
+      try { this.audio.destroy(); } catch (error) { /* 平台可能已回收 */ }
+    }
     const audio = wx.createInnerAudioContext({ useWebAudioImplement: false });
     audio.obeyMuteSwitch = false;
-    audio.onCanplay(() => this._emit('canplay'));
-    audio.onPlay(() => {
-      this.failStreak = 0; // 播放成功，失败计数清零
-      this._setStatus('playing');
-    });
-    audio.onPause(() => this._setStatus('paused'));
-    audio.onStop(() => this._setStatus('paused'));
-    audio.onWaiting(() => this._emit('waiting'));
-    audio.onError((err) => this._playFailed(err));
-    audio.onEnded(() => this.playNext(true));
-    audio.onTimeUpdate(() => this._emit('time', {
-      current: audio.currentTime || 0,
-      duration: audio.duration || 0,
-    }));
+    this._bindAudioEvents(audio);
     return audio;
   },
 
-  onLaunch() {
-    this.audio = this._createAudio();
+  /** 对齐 innerAudioContext / BackgroundAudioManager 的公共事件到全局状态机。 */
+  _bindAudioEvents(a) {
+    a.onCanplay(() => this._emit('canplay'));
+    a.onPlay(() => {
+      this.failStreak = 0; // 播放成功，失败计数清零
+      this._setStatus('playing');
+    });
+    a.onPause(() => this._setStatus('paused'));
+    a.onStop(() => this._setStatus('paused'));
+    a.onWaiting(() => this._emit('waiting'));
+    a.onError((err) => this._playFailed({
+      reason: 'network', code: 'AUDIO',
+      message: (err && err.errMsg) || '音频播放出错，请检查网络或音源',
+    }));
+    a.onEnded(() => this.playNext(true));
+    a.onTimeUpdate(() => this._emit('time', {
+      current: a.currentTime || 0,
+      duration: this._effectiveDuration(a.duration),
+    }));
   },
 
+  /** 来电 / 其它 App 抢占音频：记录中断前状态，结束后恢复播放。 */
+  _bindInterruptions() {
+    if (typeof wx.onAudioInterruptionBegin !== 'function') return;
+    wx.onAudioInterruptionBegin(() => {
+      this._resumeAfterInterruption = this.isPlaying();
+    });
+    if (typeof wx.onAudioInterruptionEnd === 'function') {
+      wx.onAudioInterruptionEnd(() => {
+        if (this._resumeAfterInterruption && this.audio) {
+          try { this.audio.play(); } catch (error) { /* 忽略平台回收 */ }
+        }
+        this._resumeAfterInterruption = false;
+      });
+    }
+  },
+
+  /**
+   * 总时长：/api/audio 是流式转发、无 Content-Length，audio.duration 常为 0。
+   * 优先用播放器上报的有效时长；否则用列表里已有的 track.duration 兜底，
+   * 让进度条 max 恒为正数（onTimeUpdate 拿到有效 duration 后自然覆盖）。
+   */
+  _effectiveDuration(audioDuration) {
+    const d = Number(audioDuration) || 0;
+    if (d > 0) return d;
+    const track = this.current();
+    return Number(track && track.duration) || 0;
+  },
+
+  /**
+   * 设置音源并起播。BackgroundAudioManager 必填 title（缺它后台/锁屏不显示、可能被拒）；
+   * 单例切歌先 stop 再从 0 开始；降级 innerAudioContext 直接换 src。
+   */
+  _setSrc(track, url) {
+    const a = this.audio;
+    if (!a) return;
+    if (this._useBg) {
+      try { a.stop(); } catch (error) { /* 忽略未起播时的 stop */ }
+      a.title = track.name || 'PureTone';
+      a.singer = track.artist || 'PureTone';
+      a.coverImgUrl = track.cover || '';
+      a.epname = track.album || 'PureTone';
+    }
+    a.src = url;
+    a.play();
+  },
+
+  /** 安全停止：BackgroundAudioManager 是单例，不能 destroy；降级实例的销毁在 _createAudio 重建时做。 */
   _teardownAudio() {
     if (!this.audio) return;
-    for (const fn of ['stop', 'destroy']) {
-      try {
-        this.audio[fn]();
-      } catch (error) {
-        // destroy 时平台可能已回收，忽略
-      }
-    }
+    try { this.audio.stop(); } catch (error) { /* 平台可能已回收 */ }
   },
 
   _emit(name, detail) {
@@ -140,8 +228,9 @@ App({
     const target = this.nextPlayableIndex(start, backward);
     if (target === -1) {
       this.globalData.index = -1;
+      // 先停（stop 可能触发 onStop → paused），最后再归位 idle 并 emit，避免状态被覆盖
+      this._teardownAudio();
       this._setStatus('idle');
-      this.audio.stop();
       this._emit('error', { reason: 'none_playable', track: queue[start] });
       return;
     }
@@ -152,17 +241,26 @@ App({
     }
     this.globalData.index = target;
     this._setStatus('paused'); // 切歌先归位，等 onPlay 再变 playing
-    // 换源必须销毁重建实例：部分平台/DevTools 的 setter 换 src 会继承上一个音源的
-    // 播放位置，表现为"点下一首，接着上一首的秒数继续播"。重建保证从 0 开始。
-    this._teardownAudio();
+    // 幂等创建 / 复用音频实例（后台单例只绑一次事件；降级 inner 每次重建）
     this.audio = this._createAudio();
-    this.audio.src = `${BASE}/api/audio/${track.id}`;
-    this.audio.play();
+    // 先 emit track：让页面立刻拿到 track（含 duration 兜底总时长）
     this._emit('track', { track, index: target, queue });
+    // 改走 /api/track/:id/url 门禁：拿同源音源或结构化 reason（无版权 / 风控 / 上游故障 / 需登录）
+    const ticket = (this._playTicket += 1);
+    api.trackUrl(track.id)
+      .then((data) => {
+        if (ticket !== this._playTicket) return; // 已被后续点歌覆盖，丢弃过期结果
+        this._setSrc(track, absoluteUrl(data.url));
+      })
+      .catch((err) => {
+        if (ticket !== this._playTicket) return;
+        this._playFailed(err);
+      });
   },
 
   toggle() {
     const a = this.audio;
+    if (!a) return;
     if (!this.isPlaying()) {
       if (!a.src || (this.globalData.index < 0 && this.globalData.queue.length)) {
         this.playAt(0);
@@ -217,8 +315,10 @@ App({
     if (this.failStreak >= 3) {
       this.failStreak = 0;
       this.globalData.index = -1;
-      this.globalData.status = 'idle';
-      this.audio.stop();
+      // 先停（stop 可能触发 onStop → paused），最后统一走 _setStatus('idle') 并 emit，
+      // 保证状态归位且页面收到通知，不再谎报「正在播放」
+      this._teardownAudio();
+      this._setStatus('idle');
       this._emit('error', { reason: 'consecutive_failed', count: 3, last: err });
       return;
     }
@@ -227,7 +327,8 @@ App({
   },
 
   seek(sec) {
-    this.audio.seek(Number(sec) || 0);
+    // innerAudioContext 与 BackgroundAudioManager 的 seek 单位都是秒
+    if (this.audio) this.audio.seek(Number(sec) || 0);
   },
 
   fmt(sec) {

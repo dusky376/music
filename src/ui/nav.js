@@ -1,8 +1,9 @@
-import { getSection, peekSection, prefetchSection } from '../core/api.js';
+import { getSection, peekSection, prefetchSection, getLoginStatusOnce } from '../core/api.js';
 import { emit, on } from '../core/bus.js';
 import { playAll } from '../core/player.js';
-import { saveSettings, store } from '../core/state.js';
+import { playableTracks, saveSettings, store } from '../core/state.js';
 import { isLogged } from './login.js';
+import { isSearchActive, rerenderSearch } from './search.js';
 import {
   renderTracklist,
   showEmpty,
@@ -26,12 +27,9 @@ let lastNavKey = store.currentViewKey || 'top_19723756';
 let controller = null;
 let requestToken = 0;
 
-/** 匿名模式下 fee 1/4（VIP/付费）不可播；本次会话里已失败过的同样筛掉。 */
+/** 与 core/state.js 的 playableTracks 保持同一套规则，避免 UI 与播放器各筛各的。 */
 function playableList(list) {
-  if (!store.filterPlayable) return list;
-  return list.filter(
-    (track) => !track.vip && !track.paid && !store.unavailable.has(String(track.id))
-  );
+  return playableTracks(list);
 }
 
 function isPlayable(track) {
@@ -45,25 +43,59 @@ function hasPlayableHint(list) {
 
 let filterAutoTuned = false;
 
-/**
- * 用户没手动开过关筛选时，按登录态给默认值：
- * 未登录默认"只看可播放"（少让用户踩 VIP 挫败），登录后默认全显。
- * 设置里已存在该字段的，尊重用户选择。
- */
-function initFilterDefault() {
+/** 用独立标记判断「用户是否手动设置过筛选」。
+ * 不能用 pt_settings.filterPlayable 是否存在来推断：saveSettings() 是整体写入，
+ * 拖音量/静音/随机都会顺带把这个字段写进去。 */
+function hasManualFilterSetting() {
+  if (store.filterManuallySet) return true;
+  try {
+    return localStorage.getItem('pt_filter_manual') === '1';
+  } catch {
+    return false;
+  }
+}
+
+/** 按登录态重算默认筛选。返回本次是否真的改动了值，供调用方决定要不要刷新视图。 */
+function applyFilterDefault(serverLogged) {
+  const before = store.filterPlayable;
+  if (hasManualFilterSetting()) {
+    syncFilterButton();
+    return false;
+  }
+  // 服务端登录态优先；拿不到时退回本地 isLogged()，随后 login:changed 会纠正。
+  const logged = typeof serverLogged === 'boolean' ? serverLogged : isLogged();
+  store.filterPlayable = !logged;
+  // 自动决定不写盘：让 pt_settings.filterPlayable 只代表「用户手动设置过」。
+  syncFilterButton();
+  return store.filterPlayable !== before;
+}
+
+function refreshCurrentView() {
+  // 搜索结果页只重渲染结果、保留关键词与输入框；其它视图走原来的刷新。
+  if (isSearchActive()) rerenderSearch();
+  else loadView(store.currentViewKey, { force: false });
+}
+
+/** 用户没手动设置过筛选时，按服务端登录态给默认值：
+ * 未登录默认「只看可播放」，登录后默认全显。异步等状态，避免先用本地缓存算错。 */
+async function initFilterDefault() {
   if (filterAutoTuned) return;
   filterAutoTuned = true;
+  let info = null;
   try {
-    const raw = localStorage.getItem('pt_settings');
-    if (raw && typeof JSON.parse(raw)?.filterPlayable === 'boolean') return;
-    if (!playableFilterBtn?.hasAttribute('aria-pressed') || playableFilterBtn.getAttribute('aria-pressed') === 'false') {
-      store.filterPlayable = !isLogged();
-      saveSettings();
-    }
+    info = await Promise.race([
+      getLoginStatusOnce(),
+      new Promise((resolve) => setTimeout(() => resolve(null), 1200)),
+    ]);
   } catch {
-    filterAutoTuned = false;
+    info = null;
   }
-  syncFilterButton();
+  if (applyFilterDefault(info?.logged)) refreshCurrentView();
+}
+
+function onLoginChanged({ logged } = {}) {
+  // 服务端登录态变化时，仅在用户没手动设置过时重算一次默认值。
+  if (applyFilterDefault(logged)) refreshCurrentView();
 }
 
 function syncFilterButton(totalList) {
@@ -249,9 +281,18 @@ export function restoreCurrentView() {
 
 function togglePlayableFilter() {
   store.filterPlayable = !store.filterPlayable;
+  // 用户主动操作后，默认筛选策略不再随登录态覆盖他的选择。
+  store.filterManuallySet = true;
+  try {
+    localStorage.setItem('pt_filter_manual', '1');
+  } catch {
+    // 隐私模式下 storage 不可用，store 里的标记本次会话仍有效。
+  }
   saveSettings();
+  syncFilterButton();
   showToast(store.filterPlayable ? '已开启"只看可播放"' : '已显示全部歌曲', 1800);
-  loadView(store.currentViewKey, { force: false });
+  // 搜索结果页切筛选不回原板块，只重渲染结果并保留关键词与输入框。
+  refreshCurrentView();
 }
 
 
@@ -297,15 +338,23 @@ export function initNav() {
   sidebarBackdrop?.addEventListener('click', closeSidebar);
 
   playAllBtn?.addEventListener('click', () => {
-    if (!store.playlist.length) {
-      showToast('当前列表没有可播放的歌曲', 1800);
+    // 「播放全部」尊重「只看可播放」：用过滤后的列表，避免连播被隐藏的 VIP 歌。
+    const list = playableList(store.playlist);
+    if (!list.length) {
+      showToast(
+        store.filterPlayable
+          ? '筛选后没有可播放的歌曲，可关闭「只看可播放」再试'
+          : '当前列表没有可播放的歌曲',
+        1800
+      );
       return;
     }
-    playAll(store.playlist);
+    playAll(list);
   });
 
   on('favorites:change', refreshLocalView);
   on('history:change', refreshLocalView);
+  on('login:changed', onLoginChanged);
 
   const initial = navFor(store.currentViewKey) || navLinks[0];
   if (initial) loadView(initial.dataset.key);

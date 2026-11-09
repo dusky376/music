@@ -1,5 +1,9 @@
 import { on } from '../core/bus.js';
 
+// 注意：index.html 里的 #fluidCanvas 是一个 div（纯 CSS 渐变层），不是 <canvas>。
+// 本模块不绘制像素，只按歌曲把 --ambient-a/b/c 三个变量写到 :root，
+// 由 overlays.css 的 .fluid-ambient-canvas 消费；保留历史 id 以免牵动 CSS / HTML。
+
 const PALETTES = [
   ['#a9c9ff', '#ffc7bd', '#d9c8ff'],
   ['#ffd1dc', '#c7e8ff', '#ffe6b8'],

@@ -29,7 +29,7 @@
         <view class="lyric-lead" style="height: {{lyricLead}}rpx"></view>
         <view
           wx:for="{{lyricLines}}"
-          wx:key="time"
+          wx:key="t"
           class="lyric {{index === lyricActive ? 'lyric-active' : ''}}"
           data-t="{{item.t}}"
           data-index="{{index}}"
@@ -43,17 +43,25 @@
 
     <!-- 底部控制组：进度条 + 时间 + 控制键，推到屏幕最底边 -->
     <view class="bottom-block">
-      <slider
-        class="progress"
-        min="0"
-        max="{{duration || 1}}"
-        value="{{current}}"
-        activeColor="#007aff"
-        backgroundColor="rgba(0,0,0,0.08)"
-        block-size="18"
-        bindchanging="onSliderChanging"
-        bindchange="onSeek"
-      />
+      <!-- 外层 view 承接触摸即锁：slider 的 bindchanging 首帧前有时间差，touchstart 最早最稳 -->
+      <view
+        class="progress-box"
+        bindtouchstart="onSliderTouchStart"
+        bindtouchend="onSliderTouchEnd"
+        bindtouchcancel="onSliderTouchEnd"
+      >
+        <slider
+          class="progress"
+          min="0"
+          max="{{duration || 1}}"
+          value="{{current}}"
+          activeColor="#007aff"
+          backgroundColor="rgba(0,0,0,0.08)"
+          block-size="18"
+          bindchanging="onSliderChanging"
+          bindchange="onSeek"
+        />
+      </view>
       <view class="times"><text>{{currText}}</text><text>{{durText}}</text></view>
 
       <view class="controls">

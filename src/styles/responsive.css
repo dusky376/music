@@ -110,7 +110,7 @@
   .hero-banner,
   .track-grid-header,
   .track-grid-body {
-    padding-inline: 24px;
+    padding-inline: calc(24px + env(safe-area-inset-left)) calc(24px + env(safe-area-inset-right));
   }
 
   .modal-main-stage {
@@ -187,14 +187,16 @@
 
 @media (max-width: 760px) {
   :root {
-    --player-h: 108px;
+    /* 两行 dock 内容 88px + 上下内边距，再叠加 Home Indicator 安全区 */
+    --player-h: calc(108px + env(safe-area-inset-bottom));
   }
 
   .topbar {
     height: auto;
     flex: 0 0 auto;
     flex-wrap: wrap;
-    padding: 9px 14px 10px;
+    /* 刘海屏顶部 + 左右安全边距 */
+    padding: calc(9px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right)) 10px calc(14px + env(safe-area-inset-left));
     gap: 8px 9px;
   }
 
@@ -235,7 +237,7 @@
     align-items: center;
     padding-top: 24px;
     padding-bottom: 15px;
-    padding-inline: 18px;
+    padding-inline: calc(18px + env(safe-area-inset-left)) calc(18px + env(safe-area-inset-right));
   }
 
   .hero-title {
@@ -259,7 +261,7 @@
   }
 
   .track-grid-body {
-    padding: 9px 10px 120px;
+    padding: 9px calc(10px + env(safe-area-inset-right)) 120px calc(10px + env(safe-area-inset-left));
   }
 
   .track-item {
@@ -330,7 +332,7 @@
       "timeline timeline";
     align-items: center;
     gap: 0 4px;
-    padding: 8px 13px calc(8px + env(safe-area-inset-bottom));
+    padding: 8px calc(13px + env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) calc(13px + env(safe-area-inset-left));
   }
 
   .dock-track-brief {
@@ -496,7 +498,7 @@
 
 @media (max-width: 390px) {
   .topbar {
-    padding-inline: 11px;
+    padding-inline: calc(11px + env(safe-area-inset-left)) calc(11px + env(safe-area-inset-right));
   }
 
   .brand-text {
@@ -504,7 +506,7 @@
   }
 
   .hero-banner {
-    padding-inline: 15px;
+    padding-inline: calc(15px + env(safe-area-inset-left)) calc(15px + env(safe-area-inset-right));
   }
 
   .hero-title {
@@ -512,11 +514,11 @@
   }
 
   .track-grid-body {
-    padding-inline: 7px;
+    padding-inline: calc(7px + env(safe-area-inset-left)) calc(7px + env(safe-area-inset-right));
   }
 
   .dock-player {
-    padding-inline: 9px;
+    padding-inline: calc(9px + env(safe-area-inset-left)) calc(9px + env(safe-area-inset-right));
   }
 
   .dock-artwork {
@@ -535,11 +537,15 @@
   }
 }
 
-/* —— 触控目标：移动端把小按钮的点击热区扩到 ≥40px，视觉不变 —— */
+/* —— 触控目标：移动端把小按钮的点击热区扩到 ≥44px，视觉不变 —— */
 @media (pointer: coarse), (max-width: 900px) {
   .track-fav-btn,
   .queue-item-remove,
-  .search-clear-btn {
+  .search-clear-btn,
+  .dock-btns .round-btn,
+  .round-btn-main,
+  .modal-btn-cluster .round-btn,
+  .modal-play-btn {
     position: relative;
   }
 
@@ -549,6 +555,21 @@
     content: '';
     position: absolute;
     inset: -9px;
+    border-radius: 50%;
+  }
+
+  /* 主控制键可见尺寸约 29~40px，用伪元素把命中区撑到 44px，不改变可见布局 */
+  .dock-btns .round-btn::before,
+  .round-btn-main::before,
+  .modal-btn-cluster .round-btn::before,
+  .modal-play-btn::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 44px;
+    height: 44px;
+    transform: translate(-50%, -50%);
     border-radius: 50%;
   }
 }

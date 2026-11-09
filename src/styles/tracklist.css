@@ -10,7 +10,7 @@
   color: var(--text-main);
   font-size: 13px;
   cursor: pointer;
-  transition: background 140ms ease, opacity 140ms ease;
+  transition: background var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out);
 }
 
 .track-item::after {
@@ -41,11 +41,11 @@
 }
 
 .track-item.unavailable {
-  opacity: 0.42;
+  opacity: 0.72;
 }
 
 .track-item.unavailable.active {
-  opacity: 0.72;
+  opacity: 0.9;
 }
 
 .col-index {
@@ -59,7 +59,7 @@
 }
 
 .idx-text {
-  transition: opacity 120ms ease;
+  transition: opacity var(--dur-fast) var(--ease-out);
 }
 
 .hover-play-icon {
@@ -138,6 +138,11 @@
   }
 }
 
+/* role=cell 包裹层用 display:contents，保持 img / 按钮仍是 grid item */
+.cell-contents {
+  display: contents;
+}
+
 .col-art {
   width: 42px;
   height: 42px;
@@ -169,6 +174,13 @@
 .track-name-text {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* 不可用歌曲的文字线索：中性配色，不与品牌红（播放错误）混淆 */
+.badge-unavailable {
+  color: var(--text-sub);
+  background: var(--bg-soft);
+  border-color: transparent;
 }
 
 .col-artist,
@@ -203,7 +215,7 @@
   background: var(--bg-elevated);
   box-shadow: var(--shadow-sm);
   transform: translateY(-50%);
-  transition: color 160ms ease, transform 160ms ease;
+  transition: color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
 }
 
 .track-fav-btn .icon {

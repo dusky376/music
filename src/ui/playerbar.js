@@ -17,8 +17,6 @@ import { isFavorited, saveSettings, store, toggleFavorite } from '../core/state.
 import { showToast } from './toast.js';
 
 const FALLBACK = '/assets/cover.svg';
-const PLAY_PATH = '<path d="M8 5v14l11-7z"/>';
-const PAUSE_PATH = '<rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>';
 
 const refs = {
   dockArt: document.getElementById('dockArtImg'),
@@ -30,9 +28,7 @@ const refs = {
   stageArtist: document.getElementById('stageArtist'),
   stageCover: document.getElementById('stageCoverFrame'),
   playBtn: document.getElementById('playBtn'),
-  playIcon: document.getElementById('playIconSvg'),
   modalPlayBtn: document.getElementById('modalPlayBtn'),
-  modalPlayIcon: document.getElementById('modalPlaySvg'),
   shuffle: document.getElementById('shuffleBtn'),
   prev: document.getElementById('prevBtn'),
   next: document.getElementById('nextBtn'),
@@ -42,8 +38,6 @@ const refs = {
   dur: document.getElementById('durTime'),
   modalCurr: document.getElementById('modalCurrTime'),
   modalDur: document.getElementById('modalDurTime'),
-  progressBar: document.getElementById('progressBar'),
-  modalProgressBar: document.getElementById('modalProgressBar'),
   progressTrack: document.getElementById('progressTrack'),
   modalProgressTrack: document.getElementById('modalProgressTrack'),
   progressTooltip: document.getElementById('progressTooltip'),
@@ -55,6 +49,8 @@ const refs = {
 
 let draggingSeeker = false;
 let dockTipTimer = 0;
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const coverTimers = new WeakMap();
 
 // 移动端首次成功播放后提示一次：封面可以点开看歌词。
 function maybeDockTip() {
@@ -75,15 +71,48 @@ function maybeDockTip() {
   dockTipTimer = setTimeout(() => showToast('点封面看歌词', 3200), 1800);
 }
 
+// 仅在值变化时写 aria，避免 tick 每帧重写触发读屏反复播报。
+function setAria(el, attr, value) {
+  if (el && el.getAttribute(attr) !== String(value)) el.setAttribute(attr, String(value));
+}
+
+// 用两个 CSS 变量驱动：--ratio 给 scaleX，--progress 给 thumb 的 left。
+// 避免 calc 里的乘法（老 Safari 支持不全），每帧只写变量、不触发布局。
+function setRatio(track, ratio) {
+  if (!track) return;
+  const value = clamp(ratio, 0, 1);
+  track.style.setProperty('--ratio', String(value));
+  track.style.setProperty('--progress', `${value * 100}%`);
+}
+
+// 人类可读时长，用于 slider 的 aria-valuetext。
+function humanTime(seconds) {
+  const total = Math.max(0, Math.floor(Number(seconds) || 0));
+  const minutes = Math.floor(total / 60);
+  const rest = total % 60;
+  return minutes > 0 ? `${minutes} 分 ${rest} 秒` : `${rest} 秒`;
+}
+
 function setCover(img, src) {
   if (!img) return;
   const nextSrc = src || FALLBACK;
   if (img.getAttribute('src') === nextSrc) return;
-  img.src = nextSrc;
-  img.onerror = () => {
-    img.onerror = null;
-    img.src = FALLBACK;
+  const commit = () => {
+    img.onerror = () => {
+      img.onerror = null;
+      img.src = FALLBACK;
+    };
+    img.src = nextSrc;
+    img.classList.remove('cover-swapping');
   };
+  if (reduceMotion) {
+    commit();
+    return;
+  }
+  // 先淡出约 200ms，换 src 后移除类再淡入约 200ms，合计约 400ms 交叉溶解。
+  img.classList.add('cover-swapping');
+  clearTimeout(coverTimers.get(img));
+  coverTimers.set(img, setTimeout(commit, 200));
 }
 
 function updateFavorite() {
@@ -99,15 +128,16 @@ function updateFavorite() {
   }
 }
 
-function setIcon(svg, playing) {
-  if (svg) svg.innerHTML = playing ? PAUSE_PATH : PLAY_PATH;
+// Play↔Pause 改为切换 class，由 CSS 做 morph；不再写 innerHTML。
+function setPlayState(playing) {
+  refs.playBtn?.classList.toggle('is-playing', playing);
+  refs.modalPlayBtn?.classList.toggle('is-playing', playing);
 }
 
 function updateState() {
   const playing = store.status === 'playing';
   const loading = store.status === 'loading' || store.buffering;
-  setIcon(refs.playIcon, playing);
-  setIcon(refs.modalPlayIcon, playing);
+  setPlayState(playing);
   refs.playBtn?.classList.toggle('is-loading', loading);
   refs.modalPlayBtn?.classList.toggle('is-loading', loading);
   refs.playBtn?.setAttribute('aria-label', playing ? '暂停' : '播放');
@@ -148,11 +178,14 @@ function updateTick({ current = 0, duration = 0 }) {
   const safeDuration = Number(duration) || Number(store.currentTrack?.duration) || 0;
   const safeCurrent = clamp(Number(current) || 0, 0, safeDuration || Number.MAX_SAFE_INTEGER);
   const ratio = safeDuration > 0 ? safeCurrent / safeDuration : 0;
-  const percent = `${clamp(ratio, 0, 1) * 100}%`;
-  if (refs.progressBar) refs.progressBar.style.width = percent;
-  if (refs.modalProgressBar) refs.modalProgressBar.style.width = percent;
-  if (refs.progressTrack) refs.progressTrack.setAttribute('aria-valuenow', String(Math.round(ratio * 100)));
-  if (refs.modalProgressTrack) refs.modalProgressTrack.setAttribute('aria-valuenow', String(Math.round(ratio * 100)));
+  setRatio(refs.progressTrack, ratio);
+  setRatio(refs.modalProgressTrack, ratio);
+  const wholePercent = Math.round(clamp(ratio, 0, 1) * 100);
+  setAria(refs.progressTrack, 'aria-valuenow', wholePercent);
+  setAria(refs.modalProgressTrack, 'aria-valuenow', wholePercent);
+  const valueText = `${humanTime(safeCurrent)}，共 ${humanTime(safeDuration)}`;
+  setAria(refs.progressTrack, 'aria-valuetext', valueText);
+  setAria(refs.modalProgressTrack, 'aria-valuetext', valueText);
   if (refs.curr) refs.curr.textContent = formatTime(safeCurrent);
   if (refs.modalCurr) refs.modalCurr.textContent = formatTime(safeCurrent);
   if (refs.dur) refs.dur.textContent = formatTime(safeDuration);
@@ -162,7 +195,9 @@ function updateTick({ current = 0, duration = 0 }) {
 function updateVolume({ volume = store.volume, muted = store.muted } = {}) {
   const value = muted ? 0 : volume;
   if (refs.volumeBar) refs.volumeBar.style.width = `${clamp(value, 0, 1) * 100}%`;
-  refs.volumeTrack?.setAttribute('aria-valuenow', String(Math.round(clamp(value, 0, 1) * 100)));
+  const wholePercent = Math.round(clamp(value, 0, 1) * 100);
+  setAria(refs.volumeTrack, 'aria-valuenow', wholePercent);
+  setAria(refs.volumeTrack, 'aria-valuetext', muted ? '已静音' : `音量 ${wholePercent}%`);
   if (refs.muteBtn) {
     refs.muteBtn.classList.toggle('active', muted);
     refs.muteBtn.setAttribute('aria-pressed', String(muted));
@@ -170,8 +205,8 @@ function updateVolume({ volume = store.volume, muted = store.muted } = {}) {
   }
 }
 
-function setupSeeker(track, bar, tooltip) {
-  if (!track || !bar) return;
+function setupSeeker(track, tooltip) {
+  if (!track) return;
   let pointerId = null;
 
   const ratioAt = (clientX) => {
@@ -182,7 +217,7 @@ function setupSeeker(track, bar, tooltip) {
 
   const preview = (ratio, clientX) => {
     draggingSeeker = true;
-    bar.style.width = `${ratio * 100}%`;
+    setRatio(track, ratio);
     if (tooltip) {
       const duration = Number(store.currentTrack?.duration) || 0;
       tooltip.textContent = formatTime(ratio * duration);
@@ -357,8 +392,8 @@ function bindQualityMenu() {
 
 export function initPlayerbar() {
   bindButtons();
-  setupSeeker(refs.progressTrack, refs.progressBar, refs.progressTooltip);
-  setupSeeker(refs.modalProgressTrack, refs.modalProgressBar, refs.modalTooltip);
+  setupSeeker(refs.progressTrack, refs.progressTooltip);
+  setupSeeker(refs.modalProgressTrack, refs.modalTooltip);
   setupVolume();
 
   on('player:track', () => {
